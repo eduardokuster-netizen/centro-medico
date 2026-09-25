@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Solicitud de consultorio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+  :root {
+    --ink:#3A3448; --ink-soft:#726C82; --paper:#F3F1F7; --paper-raised:#FFFFFF;
+    --line:#E1DCEC; --gold:#8873B8; --moss:#3F8F5F; --brick:#C4544A;
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; margin:0; }
+  body {
+    background:var(--paper); color:var(--ink); font-family:'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    padding: max(1.5rem, env(safe-area-inset-top)) 1rem max(2rem, env(safe-area-inset-bottom));
+  }
+  .wrap { max-width:520px; margin:0 auto; }
+  h1 { font-size:1.4rem; margin:0 0 .3rem; }
+  .sub { color:var(--ink-soft); font-size:.92rem; margin:0 0 1.6rem; }
+  .card { background:var(--paper-raised); border:1px solid var(--line); border-radius:8px; padding:1.4rem 1.2rem; }
+  .field { margin-bottom:1rem; }
+  .field label { display:block; font-size:.82rem; color:var(--ink-soft); margin-bottom:.35rem; }
+  .field input, .field select, .field textarea {
+    width:100%; padding:.65rem .7rem; border:1px solid var(--line); border-radius:5px;
+    background:var(--paper); color:var(--ink); font-size:.95rem; font-family:inherit;
+  }
+  .field textarea { resize:vertical; min-height:70px; }
+  .radio-row { display:flex; gap:.6rem; flex-wrap:wrap; }
+  .radio-opt { flex:1; min-width:110px; border:1px solid var(--line); border-radius:6px; padding:.6rem .5rem; text-align:center; font-size:.85rem; cursor:pointer; }
+  .radio-opt.sel { border-color:var(--gold); background:#EDE7F7; color:var(--gold); font-weight:600; }
+  .btn { width:100%; background:var(--ink); color:#fff; border:none; border-radius:6px; padding:.85rem; font-size:1rem; font-weight:600; cursor:pointer; margin-top:.4rem; }
+  .btn:disabled { opacity:.6; cursor:default; }
+  .error-msg { background:#F7DEDA; color:var(--brick); padding:.6rem .75rem; border-radius:5px; font-size:.85rem; margin-bottom:1rem; }
+  .success { text-align:center; padding:2.5rem 1rem; }
+  .success .check { font-size:2.6rem; color:var(--moss); margin-bottom:.6rem; }
+  .required { color:var(--brick); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Solicitud de consultorio</h1>
+  <p class="sub">Completa tus datos y nos pondremos en contacto contigo para coordinar el alquiler de un consultorio en el centro.</p>
+  <div class="card" id="form-card">
+    <div id="form-error"></div>
+    <div class="field"><label>Nombre completo <span class="required">*</span></label><input id="f-nombre" placeholder="Dra. Ana Pérez"></div>
+    <div class="field"><label>Teléfono (WhatsApp de preferencia) <span class="required">*</span></label><input id="f-telefono" placeholder="809-000-0000"></div>
+    <div class="field"><label>Correo (opcional)</label><input id="f-email" type="email" placeholder="correo@ejemplo.com"></div>
+    <div class="field"><label>Especialidad</label><input id="f-especialidad" placeholder="Cardiología, Pediatría, etc."></div>
+    <div class="field"><label>Modalidad de tu interés</label>
+      <div class="radio-row">
+        <div class="radio-opt sel" id="opt-completo" data-val="completo">Consultorio completo</div>
+        <div class="radio-opt" id="opt-dia" data-val="dia">Por día</div>
+        <div class="radio-opt" id="opt-noseguro" data-val="">No estoy seguro</div>
+      </div>
+    </div>
+    <div class="field"><label>Piso o consultorio de tu interés (opcional)</label><input id="f-consultorio" placeholder="Ej. Piso 2, o cualquiera disponible"></div>
+    <div class="field"><label>Mensaje (opcional)</label><textarea id="f-mensaje" placeholder="Cuéntanos qué días u horario te interesa, o cualquier detalle adicional."></textarea></div>
+    <button class="btn" id="btn-enviar">Enviar solicitud</button>
+  </div>
+  <div class="card success" id="success-card" style="display:none">
+    <div class="check">✓</div>
+    <h2 style="margin:0 0 .4rem">¡Solicitud enviada!</h2>
+    <p style="color:var(--ink-soft);margin:0">Gracias por tu interés. Nos pondremos en contacto contigo pronto.</p>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var FIREBASE_CONFIG = {
+    apiKey: "AIzaSyBTsBDuDlJ8L22-6TXFZigPgLFKHw8PpNc",
+    authDomain: "centro-medico-122c0.firebaseapp.com",
+    projectId: "centro-medico-122c0",
+    storageBucket: "centro-medico-122c0.firebasestorage.app",
+    messagingSenderId: "1003838678131",
+    appId: "1:1003838678131:web:150f2ddb92ff27ba55b606"
+  };
+  var db = null;
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+  } catch (err){ console.error(err); }
+
+  var modalidad = 'completo';
+  document.querySelectorAll('.radio-opt').forEach(function(el){
+    el.onclick = function(){
+      document.querySelectorAll('.radio-opt').forEach(function(x){ x.classList.remove('sel'); });
+      el.classList.add('sel');
+      modalidad = el.dataset.val;
+    };
+  });
+
+  function escapeHtml(s){
+    return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  document.getElementById('btn-enviar').onclick = function(){
+    var errEl = document.getElementById('form-error');
+    errEl.innerHTML = '';
+    var nombre = document.getElementById('f-nombre').value.trim();
+    var telefono = document.getElementById('f-telefono').value.trim();
+    if (!nombre || !telefono){
+      errEl.innerHTML = '<div class="error-msg">Por favor completa tu nombre y teléfono.</div>';
+      return;
+    }
+    if (!db){
+      errEl.innerHTML = '<div class="error-msg">No se pudo conectar. Intenta de nuevo en un momento.</div>';
+      return;
+    }
+    var btn = document.getElementById('btn-enviar');
+    btn.disabled = true; btn.textContent = 'Enviando…';
+    db.collection('solicitudes_doctores').add({
+      nombre: nombre,
+      telefono: telefono,
+      email: document.getElementById('f-email').value.trim(),
+      especialidad: document.getElementById('f-especialidad').value.trim(),
+      modalidadInteres: modalidad,
+      consultorioInteres: document.getElementById('f-consultorio').value.trim(),
+      mensaje: document.getElementById('f-mensaje').value.trim(),
+      estado: 'pendiente',
+      fecha: new Date().toISOString().slice(0,10),
+      creadoEn: new Date().toISOString()
+    }).then(function(){
+      document.getElementById('form-card').style.display = 'none';
+      document.getElementById('success-card').style.display = '';
+    }).catch(function(err){
+      console.error(err);
+      btn.disabled = false; btn.textContent = 'Enviar solicitud';
+      errEl.innerHTML = '<div class="error-msg">No se pudo enviar. Intenta de nuevo.</div>';
+    });
+  };
+})();
+</script>
+</body>
+</html>

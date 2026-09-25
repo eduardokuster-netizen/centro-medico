@@ -10,6 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <style>
   :root {
     --ink:#3A3448; --ink-soft:#726C82; --paper:#F3F1F7; --paper-raised:#FFFFFF;
@@ -204,8 +205,8 @@
 </style>
 </head>
 <body>
-<div class="app">
-  <aside class="sidebar">
+<div class="app" id="app-root">
+  <aside class="sidebar" id="sidebar">
     <div class="brand">
       <div class="mark">CENTRO MÉDICO · CONSULTORIOS EN ALQUILER</div>
       <h1>Ledger de Consultorios</h1>
@@ -219,8 +220,12 @@
       <button data-view="compartir"><span class="num">06</span>Compartir con doctores</button>
       <button data-view="rentabilidad"><span class="num">07</span>Rentabilidad</button>
       <button data-view="contratos"><span class="num">08</span>Contratos</button>
+      <button data-view="solicitudes"><span class="num">09</span>Solicitudes</button>
     </nav>
-    <div class="sidebar-foot">Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.06</span></div>
+    <div class="sidebar-foot">
+      <button id="btn-logout" class="btn ghost small" style="width:100%;margin-bottom:.6rem">Cerrar sesión</button>
+      Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.08</span>
+    </div>
   </aside>
 
   <main class="main" id="main">
@@ -247,13 +252,14 @@
     consultorios: [],
     alquileres: [],
     pagos: {},
+    solicitudes: [],
     config: { telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'', mensajeAmigable:'', diasGraciaRecordatorio:3, contratoTemplate:'',
       nombreArrendador:'', nacionalidadArrendador:'', cedulaArrendador:'', domicilioArrendador:'',
-      descripcionInmueble:'', serviciosIncluidos:'', ciudadFirma:'Santo Domingo de Guzmán, Distrito Nacional', duracionContrato:'un (1) año calendario' },
-    loaded: { consultorios:false, alquileres:false, pagos:false, config:false },
+      descripcionInmueble:'', serviciosIncluidos:'', ciudadFirma:'Santo Domingo de Guzmán, Distrito Nacional', duracionContrato:'un (1) año calendario', duracionContratoMeses:12 },
+    loaded: { consultorios:false, alquileres:false, pagos:false, config:false, solicitudes:false },
     search: '',
   };
-  var charts = { ingresos:null, distribucion:null };
+  var charts = { ingresos:null, distribucion:null, tendencia:null };
 
   function monthKey(d){ d = d || new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
   function monthLabel(d){ d = d || new Date(); return d.toLocaleDateString('es-DO', {month:'long', year:'numeric'}); }
@@ -276,6 +282,10 @@
     if (!iso) return '____________';
     var d = new Date(iso + 'T00:00:00');
     if (isNaN(d.getTime())) return '____________';
+    return d.getDate() + ' de ' + MESES_ES[d.getMonth()] + ' del ' + d.getFullYear();
+  }
+  function fechaLargaFromDate(d){
+    if (!d || isNaN(d.getTime())) return '____________';
     return d.getDate() + ' de ' + MESES_ES[d.getMonth()] + ' del ' + d.getFullYear();
   }
   function diaPagoTexto(diaPago){
@@ -348,6 +358,29 @@
     var periods = billingPeriods(rental);
     var pendientes = periods.filter(function(p){ var pg = state.pagos[rental.id+'__'+p.key]; return !(pg && pg.pagado); });
     return { totalPeriodos: periods.length, pendientes: pendientes, mesesPendientes: pendientes.length, monto: pendientes.length * (Number(rental.precioMensual)||0) };
+  }
+  /** Contract end date = fechaInicio + duracionContratoMeses (config, default 12). */
+  function fechaVencimientoContrato(rental){
+    if (!rental.fechaInicio) return null;
+    var start = new Date(rental.fechaInicio + 'T00:00:00');
+    if (isNaN(start.getTime())) return null;
+    var meses = Number(state.config.duracionContratoMeses) || 12;
+    return new Date(start.getFullYear(), start.getMonth() + meses, start.getDate());
+  }
+  function diasParaVencerContrato(rental){
+    var venc = fechaVencimientoContrato(rental);
+    if (!venc) return null;
+    var today = new Date();
+    var t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    return Math.round((venc - t0) / 86400000);
+  }
+  /** Active rentals whose contract expires within 60 days (or already expired). */
+  function computeContratosPorVencer(){
+    return state.alquileres
+      .filter(function(a){ return a.activo !== false; })
+      .map(function(a){ return { a:a, dias: diasParaVencerContrato(a), venc: fechaVencimientoContrato(a) }; })
+      .filter(function(x){ return x.dias !== null && x.dias <= 60; })
+      .sort(function(x,y){ return x.dias - y.dias; });
   }
   var DEFAULT_MENSAJE_RECORDATORIO = 'Hola {nombre}, le recordamos que tiene {meses} mes(es) de alquiler pendiente(s) por un total de {monto}, correspondiente a su consultorio ({consultorio}). Le agradecemos regularizar el pago a la mayor brevedad. ¡Gracias!';
   var DEFAULT_MENSAJE_AMIGABLE = '\u00a1Hola {nombre}! \u263a Solo un recordatorio amigable de que el pago de tu alquiler de este mes ({monto}, {consultorio}) sigue pendiente. Si ya lo hiciste, \u00a1mil gracias, ignora este mensaje! Cualquier cosa que necesites, aqu\u00ed estamos. \u00a1Que tengas un excelente d\u00eda!';
@@ -444,11 +477,51 @@
       }
       if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
       db = firebase.firestore();
-      subscribeAll();
+      document.getElementById('sidebar').style.display = 'none';
+      firebase.auth().onAuthStateChanged(function(user){
+        if (user){
+          document.getElementById('sidebar').style.display = '';
+          if (!didSubscribe){ didSubscribe = true; subscribeAll(); }
+          render();
+        } else {
+          didSubscribe = false;
+          document.getElementById('sidebar').style.display = 'none';
+          renderLoginScreen();
+        }
+      });
     } catch (err){
       console.error(err);
       renderFatal('No se pudo conectar con la base de datos. Revisa la configuración de Firebase.');
     }
+  }
+  var didSubscribe = false;
+
+  function renderLoginScreen(){
+    document.getElementById('main').innerHTML = ''
+      + '<div style="max-width:340px;margin:12vh auto 0;padding:0 1rem;">'
+      +   '<h2 style="margin:0 0 .3rem">Ledger de Consultorios</h2>'
+      +   '<p style="color:var(--ink-soft);font-size:.9rem;margin:0 0 1.4rem">Inicia sesión para administrar el centro médico.</p>'
+      +   '<div id="login-error"></div>'
+      +   '<div class="field"><label>Correo</label><input id="login-email" type="email" autocomplete="username" placeholder="tucorreo@ejemplo.com"></div>'
+      +   '<div class="field" style="margin-top:.8rem"><label>Contraseña</label><input id="login-pass" type="password" autocomplete="current-password" placeholder="••••••••"></div>'
+      +   '<button class="btn" id="btn-login" style="width:100%;margin-top:1.1rem">Iniciar sesión</button>'
+      + '</div>';
+    function doLogin(){
+      var email = document.getElementById('login-email').value.trim();
+      var pass = document.getElementById('login-pass').value;
+      var errEl = document.getElementById('login-error');
+      errEl.innerHTML = '';
+      if (!email || !pass){ errEl.innerHTML = '<div class="error-msg" style="margin-bottom:.8rem">Escribe tu correo y contraseña.</div>'; return; }
+      firebase.auth().signInWithEmailAndPassword(email, pass).catch(function(err){
+        var msg = 'No se pudo iniciar sesión. Verifica tus datos.';
+        if (err.code === 'auth/invalid-email') msg = 'El correo no es válido.';
+        else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = 'Correo o contraseña incorrectos.';
+        else if (err.code === 'auth/too-many-requests') msg = 'Demasiados intentos. Espera un momento e intenta de nuevo.';
+        errEl.innerHTML = '<div class="error-msg" style="margin-bottom:.8rem">' + escapeHtml(msg) + '</div>';
+      });
+    }
+    document.getElementById('btn-login').onclick = doLogin;
+    document.getElementById('login-pass').onkeydown = function(e){ if (e.key === 'Enter') doLogin(); };
   }
 
   function subscribeAll(){
@@ -484,9 +557,15 @@
     db.doc('config/centro').onSnapshot(function(snap){
       if (snap.exists) state.config = Object.assign({telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'', mensajeAmigable:'', diasGraciaRecordatorio:3, contratoTemplate:'',
         nombreArrendador:'', nacionalidadArrendador:'', cedulaArrendador:'', domicilioArrendador:'',
-        descripcionInmueble:'', serviciosIncluidos:'', ciudadFirma:'Santo Domingo de Guzmán, Distrito Nacional', duracionContrato:'un (1) año calendario'
+        descripcionInmueble:'', serviciosIncluidos:'', ciudadFirma:'Santo Domingo de Guzmán, Distrito Nacional', duracionContrato:'un (1) año calendario', duracionContratoMeses:12
       }, snap.data());
       state.loaded.config = true;
+      render();
+    }, function(err){ console.error(err); });
+
+    db.collection('solicitudes_doctores').onSnapshot(function(snap){
+      state.solicitudes = snap.docs.map(function(doc){ return Object.assign({id:doc.id}, doc.data()); });
+      state.loaded.solicitudes = true;
       render();
     }, function(err){ console.error(err); });
   }
@@ -569,8 +648,35 @@
     return byFloor;
   }
 
+  /** Billed revenue for each of the last `numMonths` months (oldest to newest, current
+   * month included), reconstructed from every rental's fechaInicio/fechaFin — so a
+   * rental that already ended still counts for the months it was actually active. */
+  function computeMonthlyRevenueSeries(numMonths){
+    var today = new Date();
+    var months = [];
+    for (var i = numMonths - 1; i >= 0; i--){
+      var d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      months.push({ y: d.getFullYear(), m: d.getMonth(), label: MESES_ES[d.getMonth()].slice(0,3) + ' ' + String(d.getFullYear()).slice(2) });
+    }
+    var totals = months.map(function(){ return 0; });
+    state.alquileres.forEach(function(a){
+      if (!a.fechaInicio) return;
+      var start = new Date(a.fechaInicio + 'T00:00:00');
+      if (isNaN(start.getTime())) return;
+      var end = a.fechaFin ? new Date(a.fechaFin + 'T00:00:00') : null;
+      months.forEach(function(mo, idx){
+        var monthStart = new Date(mo.y, mo.m, 1);
+        var monthEnd = new Date(mo.y, mo.m + 1, 0);
+        var startedByThen = start <= monthEnd;
+        var stillActive = !end || end >= monthStart;
+        if (startedByThen && stillActive) totals[idx] += Number(a.precioMensual)||0;
+      });
+    });
+    return { labels: months.map(function(mo){return mo.label;}), values: totals };
+  }
+
   function render(){
-    if (!state.loaded.consultorios || !state.loaded.alquileres || !state.loaded.pagos || !state.loaded.config){
+    if (!state.loaded.consultorios || !state.loaded.alquileres || !state.loaded.pagos || !state.loaded.config || !state.loaded.solicitudes){
       document.getElementById('main').innerHTML = '<div class="empty-note">Cargando…</div>';
       return;
     }
@@ -584,6 +690,7 @@
     else if (state.view === 'compartir') main.innerHTML = renderCompartir();
     else if (state.view === 'rentabilidad') main.innerHTML = renderRentabilidad();
     else if (state.view === 'contratos') main.innerHTML = renderContratos();
+    else if (state.view === 'solicitudes') main.innerHTML = renderSolicitudes();
     bindViewEvents();
     if (state.view === 'rentabilidad') setTimeout(drawRentabilidadCharts, 0);
   }
@@ -641,7 +748,28 @@
     +     '</tbody></table>'
     +     '<p style="margin-top:.7rem"><button class="btn ghost small" data-nav="cobros">Ir a Cobros del mes</button></p>'
     +   '</div></div>'
+    + '</div>'
+    + renderContratosPorVencerSection()
     + '</div>';
+  }
+
+  function renderContratosPorVencerSection(){
+    var lista = computeContratosPorVencer();
+    if (lista.length === 0) return '';
+    var roomName = function(id){ var c = state.consultorios.find(function(x){return String(x.id)===String(id);}); return c ? c.nombre : ('Consultorio ' + id); };
+    return ''
+    + '<div class="view-head" style="margin-top:1.8rem"><div><h2 style="font-size:1.15rem">Contratos por vencer</h2><p>Según la fecha de inicio de cada alquiler y la duración configurada en Contratos (' + (Number(state.config.duracionContratoMeses)||12) + ' meses).</p></div></div>'
+    + '<div class="card"><div class="card-body">'
+    +   '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Vence</th><th>Estado</th></tr></thead><tbody>'
+    +   lista.map(function(x){
+          var estado = x.dias < 0
+            ? '<span class="tag completo">Vencido hace ' + Math.abs(x.dias) + ' día(s)</span>'
+            : (x.dias <= 30 ? '<span class="tag completo">En ' + x.dias + ' día(s)</span>' : '<span class="tag deposito">En ' + x.dias + ' día(s)</span>');
+          return '<tr><td>' + escapeHtml(x.a.especialista.nombre) + '</td><td>' + escapeHtml(roomName(x.a.consultorioId)) + '</td>'
+            + '<td class="mono">' + fechaLargaFromDate(x.venc) + '</td><td>' + estado + '</td></tr>';
+        }).join('')
+    +   '</tbody></table>'
+    + '</div></div>';
   }
 
   function renderConsultorios(){
@@ -739,7 +867,18 @@
       '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Modalidad</th><th>Precio/mes</th><th>Día de pago</th><th>Depósito</th><th>Estado</th><th></th></tr></thead><tbody>'
       + rows.map(function(a){
           var modTag = a.modalidad === 'completo' ? '<span class="tag completo">Completo</span>' : '<span class="tag dia">' + getDias(a).map(dayLabel).join(', ') + '</span>';
-          var dep = a.deposito && a.deposito.dado ? '<span class="tag deposito">' + money(a.deposito.monto) + '</span>' : '<span class="tag sindep">No dio</span>';
+          var dep;
+          if (a.deposito && a.deposito.dado){
+            var res = a.deposito.resolucion;
+            if (res){
+              var resLabel = res.estado === 'devuelto' ? 'Devuelto' : (res.estado === 'retenido' ? 'Retenido ' + money(res.montoRetenido) : 'Perdido');
+              dep = '<span class="tag deposito">' + money(a.deposito.monto) + ' — ' + resLabel + '</span>';
+            } else {
+              dep = '<span class="tag deposito">' + money(a.deposito.monto) + '</span>';
+            }
+          } else {
+            dep = '<span class="tag sindep">No dio</span>';
+          }
           var acciones = '<div class="actions-cell"><button class="btn ghost small" data-edit-alquiler="' + a.id + '">Editar</button>'
             + '<button class="btn ghost small" data-historial="' + a.id + '">Historial</button>'
             + (a.activo === false
@@ -1010,6 +1149,7 @@
     +   heroCell('Potencial no capturado', money(potencialPerdido), 'según tarifas sugeridas en espacios vacíos', 'brick')
     +   heroCell('Consultorios sin tarifa fijada', String(sinTarifa), 'no se pueden estimar — edítalos en Consultorios', 'moss')
     + '</div>'
+    + '<div class="card chart-card" style="margin-bottom:1.2rem"><h3>Tendencia de ingresos mensuales (últimos 12 meses)</h3><div class="chart-box"><canvas id="chart-tendencia"></canvas></div></div>'
     + '<div class="card chart-card" style="margin-bottom:1.2rem"><h3>Ingreso mensual por consultorio</h3><div class="chart-box"><canvas id="chart-ingresos"></canvas></div></div>'
     + '<div class="panel-cols">'
     +   '<div class="card chart-card"><h3>Ingreso actual vs. potencial no capturado</h3><div class="chart-box small"><canvas id="chart-distribucion"></canvas></div></div>'
@@ -1049,7 +1189,10 @@
     +   '<div class="field"><label>Servicios incluidos en el alquiler</label><input id="cfg-servicios" value="' + escapeHtml(cfg.serviciosIncluidos) + '" placeholder="limpieza, energía eléctrica, aire acondicionado, secretaria, baño para pacientes, sala de espera y seguridad"></div>'
     +   '<div class="row2">'
     +     '<div class="field"><label>Ciudad para la firma</label><input id="cfg-ciudad" value="' + escapeHtml(cfg.ciudadFirma) + '"></div>'
-    +     '<div class="field"><label>Duración del contrato</label><input id="cfg-duracion" value="' + escapeHtml(cfg.duracionContrato) + '"></div>'
+    +     '<div class="field"><label>Duración del contrato (texto)</label><input id="cfg-duracion" value="' + escapeHtml(cfg.duracionContrato) + '"></div>'
+    +   '</div>'
+    +   '<div class="field"><label>Duración del contrato (meses, para calcular vencimientos)</label><input id="cfg-duracion-meses" type="number" min="1" value="' + (Number(cfg.duracionContratoMeses)||12) + '" style="max-width:140px">'
+    +     '<div class="hint">Se usa para calcular la fecha de vencimiento de cada contrato y avisarte en el Panel cuando falten 60 días o menos.</div>'
     +   '</div>'
     + '</div></div>'
     + '<div class="card"><div class="card-head"><h3>Generar contrato por especialista</h3></div><div class="card-body">'
@@ -1074,7 +1217,50 @@
     + '</div></div>';
   }
 
-  var DEFAULT_CONTRATO_TEMPLATE = ''
+  function renderSolicitudes(){
+    var pendientes = state.solicitudes.filter(function(s){ return s.estado !== 'procesada' && s.estado !== 'descartada'; })
+      .sort(function(a,b){ return (b.fecha||'').localeCompare(a.fecha||''); });
+    var resueltas = state.solicitudes.filter(function(s){ return s.estado === 'procesada' || s.estado === 'descartada'; })
+      .sort(function(a,b){ return (b.fecha||'').localeCompare(a.fecha||''); });
+
+    function filaSolicitud(s, accionable){
+      var modalidad = s.modalidadInteres === 'completo' ? 'Completo' : (s.modalidadInteres === 'dia' ? 'Por día' : 'No especificó');
+      var estadoTag = s.estado === 'procesada' ? '<span style="color:var(--moss)">Procesada</span>'
+        : (s.estado === 'descartada' ? '<span style="color:var(--ink-soft)">Descartada</span>' : '<span style="color:var(--gold)">Pendiente</span>');
+      return '<tr>'
+        + '<td><strong>' + escapeHtml(s.nombre||'') + '</strong><br><span style="color:var(--ink-soft)">' + escapeHtml(s.especialidad||'') + '</span></td>'
+        + '<td>' + escapeHtml(s.telefono||'') + (s.email ? '<br><span style="color:var(--ink-soft)">' + escapeHtml(s.email) + '</span>' : '') + '</td>'
+        + '<td>' + modalidad + '</td>'
+        + '<td>' + escapeHtml(s.consultorioInteres||'—') + '</td>'
+        + '<td style="max-width:220px">' + escapeHtml(s.mensaje||'') + '</td>'
+        + '<td>' + estadoTag + '</td>'
+        + '<td>' + (accionable
+              ? '<div class="actions-cell"><button class="btn small" data-aprobar-solicitud="' + s.id + '">Aprobar</button><button class="btn ghost small" data-descartar-solicitud="' + s.id + '">Descartar</button></div>'
+              : '')
+        + '</td>'
+        + '</tr>';
+    }
+
+    return ''
+    + '<div class="view-head"><div><h2>Solicitudes</h2><p>Doctores interesados que llenaron el formulario público quedan aquí para que apruebes o descartes la solicitud.</p></div>'
+    +   '<button class="btn ghost small" id="btn-copiar-link-solicitud">Copiar enlace del formulario</button></div>'
+    + '<div class="hero-strip">'
+    +   heroCell('Solicitudes pendientes', String(pendientes.length), 'por revisar', pendientes.length>0?'brick':'moss')
+    + '</div>'
+    + '<div class="card"><div class="card-head"><h3>Pendientes</h3></div><div class="card-body">'
+    + (pendientes.length === 0 ? '<p class="empty-note">No hay solicitudes pendientes.</p>' :
+      '<table class="list"><thead><tr><th>Nombre</th><th>Contacto</th><th>Modalidad</th><th>Consultorio de interés</th><th>Mensaje</th><th>Estado</th><th></th></tr></thead><tbody>'
+      + pendientes.map(function(s){ return filaSolicitud(s, true); }).join('')
+      + '</tbody></table>')
+    + '</div></div>'
+    + (resueltas.length === 0 ? '' :
+      '<div class="card" style="margin-top:1.2rem"><div class="card-head"><h3>Ya resueltas</h3></div><div class="card-body">'
+      + '<table class="list"><thead><tr><th>Nombre</th><th>Contacto</th><th>Modalidad</th><th>Consultorio de interés</th><th>Mensaje</th><th>Estado</th><th></th></tr></thead><tbody>'
+      + resueltas.map(function(s){ return filaSolicitud(s, false); }).join('')
+      + '</tbody></table>'
+      + '</div></div>');
+  }
+
     + '<p class="center"><strong>CONTRATO DE ARRENDAMIENTO DE INMUEBLE</strong></p>'
     + '<p class="center underline"><strong>DECLARACIONES.</strong></p>'
     + '<p><strong>ENTRE</strong>: De una parte, <strong>{ARRENDADOR_NOMBRE}</strong>, {ARRENDADOR_NACIONALIDAD}, Residente de República Dominicana bajo la Cédula número {ARRENDADOR_CEDULA}, domiciliada en {ARRENDADOR_DOMICILIO}; quien en lo que sigue de este contrato se denominará <strong>"LA ARRENDADORA"</strong>, o por su propio nombre;</p>'
@@ -1215,12 +1401,31 @@
 
   function drawRentabilidadCharts(){
     if (typeof Chart === 'undefined') return;
+    var brick = cssVar('--brick'), moss = cssVar('--moss'), gold = cssVar('--gold'), ink = cssVar('--ink'), inkSoft = cssVar('--ink-soft');
+
+    var serie = computeMonthlyRevenueSeries(12);
+    var elTendencia = document.getElementById('chart-tendencia');
+    if (elTendencia){
+      if (charts.tendencia) charts.tendencia.destroy();
+      charts.tendencia = new Chart(elTendencia.getContext('2d'), {
+        type:'line',
+        data:{ labels: serie.labels, datasets:[{ label:'Ingreso mensual (RD$)', data: serie.values, borderColor: gold, backgroundColor: gold, tension:.25, pointRadius:3, fill:false }] },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:function(ctx){ return money(ctx.parsed.y); } } } },
+          scales:{
+            x:{ ticks:{ color:inkSoft, font:{family:"'IBM Plex Mono', monospace", size:9} }, grid:{ display:false } },
+            y:{ beginAtZero:true, ticks:{ color:inkSoft, font:{family:"'IBM Plex Sans', sans-serif", size:10}, callback:function(v){ return 'RD$ ' + Number(v).toLocaleString('es-DO'); } }, grid:{ color:cssVar('--line') } }
+          }
+        }
+      });
+    }
+
     var rooms = [];
     var bf = roomsByFloor(state.consultorios);
     pisosPresentes().forEach(function(p){ (bf[p]||[]).forEach(function(c){ rooms.push(c); }); });
     var labels = rooms.map(function(c){ return 'P' + c.piso + 'C' + c.pisoNumero; });
     var revenues = rooms.map(function(c){ return roomRevenue(c.id); });
-    var brick = cssVar('--brick'), moss = cssVar('--moss'), gold = cssVar('--gold'), ink = cssVar('--ink'), inkSoft = cssVar('--ink-soft');
     var colors = revenues.map(function(v){ return v>0 ? brick : moss; });
 
     var elIngresos = document.getElementById('chart-ingresos');
@@ -1319,9 +1524,55 @@
         db.doc('config/centro').set(Object.assign({}, state.config, patch)).catch(function(err){ console.error(err); toast('No se pudo guardar.'); });
       };
     });
+    var cfgDuracionMeses = document.getElementById('cfg-duracion-meses');
+    if (cfgDuracionMeses) cfgDuracionMeses.onchange = function(e){
+      db.doc('config/centro').set(Object.assign({}, state.config, {duracionContratoMeses: Number(e.target.value)||12})).catch(function(err){ console.error(err); toast('No se pudo guardar.'); });
+    };
     main.querySelectorAll('[data-contrato]').forEach(function(b){ b.onclick = function(){ openContratoWindow(b.dataset.contrato); }; });
     var btnEditContratoTpl = document.getElementById('btn-edit-contrato-tpl');
     if (btnEditContratoTpl) btnEditContratoTpl.onclick = function(){ openContratoTemplateModal(); };
+
+    main.querySelectorAll('[data-aprobar-solicitud]').forEach(function(b){
+      b.onclick = function(){
+        var s = state.solicitudes.find(function(x){ return x.id === b.dataset.aprobarSolicitud; });
+        if (!s) return;
+        openAlquilerModal({
+          prefill: { nombre: s.nombre, especialidad: s.especialidad, telefono: s.telefono, email: s.email },
+          modalidadInteres: s.modalidadInteres,
+          onSuccess: function(){
+            db.collection('solicitudes_doctores').doc(s.id).update({ estado:'procesada', procesadoEn: new Date().toISOString() })
+              .catch(function(err){ console.error(err); });
+          }
+        });
+      };
+    });
+    main.querySelectorAll('[data-descartar-solicitud]').forEach(function(b){
+      b.onclick = function(){
+        var s = state.solicitudes.find(function(x){ return x.id === b.dataset.descartarSolicitud; });
+        if (!s) return;
+        openConfirmModal({
+          title: 'Descartar solicitud',
+          message: 'Se marcará como descartada la solicitud de ' + (s.nombre||'este contacto') + '.',
+          confirmLabel: 'Descartar',
+          danger: true,
+          onConfirm: function(){
+            db.collection('solicitudes_doctores').doc(s.id).update({ estado:'descartada', procesadoEn: new Date().toISOString() })
+              .then(function(){ toast('Solicitud descartada.'); })
+              .catch(function(err){ console.error(err); toast('No se pudo actualizar. Intenta de nuevo.'); });
+          }
+        });
+      };
+    });
+    var btnCopiarLink = document.getElementById('btn-copiar-link-solicitud');
+    if (btnCopiarLink) btnCopiarLink.onclick = function(){
+      var url = window.location.origin + '/solicitud.html';
+      if (navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(url).then(function(){ toast('Enlace copiado: ' + url); })
+          .catch(function(){ toast(url); });
+      } else {
+        toast(url);
+      }
+    };
 
     var btnDl = document.getElementById('btn-download-share');
     if (btnDl) btnDl.onclick = function(){
@@ -1341,6 +1592,9 @@
   document.getElementById('nav').addEventListener('click', function(e){
     var btn = e.target.closest('button[data-view]');
     if (btn) setView(btn.dataset.view);
+  });
+  document.getElementById('btn-logout').addEventListener('click', function(){
+    firebase.auth().signOut();
   });
 
   // Generic in-app confirmation modal (no window.confirm — unreliable inside sandboxed iframes)
@@ -1381,9 +1635,13 @@
     document.getElementById('modal-cancel').onclick = closeModal;
     document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
     document.getElementById('btn-finalizar').onclick = function(){
-      db.collection('alquileres').doc(rentalId).update({activo:false, fechaFin: new Date().toISOString().slice(0,10)}).then(function(){
-        toast('Consultorio liberado.');
-      }).catch(function(err){ console.error(err); toast('No se pudo liberar. Intenta de nuevo.'); });
+      if (a.deposito && a.deposito.dado && Number(a.deposito.monto) > 0){
+        openResolucionDepositoModal(a);
+      } else {
+        db.collection('alquileres').doc(rentalId).update({activo:false, fechaFin: new Date().toISOString().slice(0,10)}).then(function(){
+          toast('Consultorio liberado.');
+        }).catch(function(err){ console.error(err); toast('No se pudo liberar. Intenta de nuevo.'); });
+      }
     };
     document.getElementById('btn-eliminar').onclick = function(){
       openConfirmModal({
@@ -1399,6 +1657,46 @@
       });
     };
   }
+
+  function openResolucionDepositoModal(a){
+    var root = document.getElementById('modal-root');
+    var estado = 'devuelto';
+    function draw(){
+      root.innerHTML = ''
+        + '<div class="overlay" id="modal-overlay"><div class="modal">'
+        +   '<div class="modal-head"><h3>Depósito en garantía</h3><button id="modal-close">✕</button></div>'
+        +   '<div class="modal-body">'
+        +     '<p style="margin:0;color:var(--ink-soft);font-size:.9rem">' + escapeHtml(a.especialista.nombre) + ' dio un depósito de <strong>' + money(a.deposito.monto) + '</strong>. ¿Qué pasó con él al finalizar el alquiler?</p>'
+        +     '<div class="field"><div class="radio-group" style="flex-direction:column;gap:.5rem">'
+        +       '<div class="radio-opt ' + (estado==='devuelto'?'sel':'') + '" id="opt-dep-devuelto" style="text-align:left">Devuelto completo al especialista</div>'
+        +       '<div class="radio-opt ' + (estado==='retenido'?'sel':'') + '" id="opt-dep-retenido" style="text-align:left">Retenido por daños (parcial o total)</div>'
+        +       '<div class="radio-opt ' + (estado==='perdido'?'sel':'') + '" id="opt-dep-perdido" style="text-align:left">Perdido por salida antes de los 6 meses</div>'
+        +     '</div></div>'
+        +     (estado === 'retenido' ? '<div class="field"><label>Monto retenido</label><input id="dep-monto-retenido" type="number" min="0" max="' + a.deposito.monto + '" value="' + a.deposito.monto + '"></div>' : '')
+        +     '<div class="field"><label>Nota (opcional)</label><input id="dep-nota" placeholder="Ej. daño en silla de paciente"></div>'
+        +   '</div>'
+        +   '<div class="modal-foot"><div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button><button class="btn" id="btn-confirmar-dep">Confirmar y finalizar</button></div></div>'
+        + '</div></div>';
+      document.getElementById('modal-close').onclick = closeModal;
+      document.getElementById('modal-cancel').onclick = closeModal;
+      document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+      document.getElementById('opt-dep-devuelto').onclick = function(){ estado='devuelto'; draw(); };
+      document.getElementById('opt-dep-retenido').onclick = function(){ estado='retenido'; draw(); };
+      document.getElementById('opt-dep-perdido').onclick = function(){ estado='perdido'; draw(); };
+      document.getElementById('btn-confirmar-dep').onclick = function(){
+        var montoRetenido = estado === 'retenido' ? Number(document.getElementById('dep-monto-retenido').value)||0 : (estado === 'perdido' ? Number(a.deposito.monto) : 0);
+        var nota = document.getElementById('dep-nota').value.trim();
+        db.collection('alquileres').doc(a.id).update({
+          activo: false,
+          fechaFin: new Date().toISOString().slice(0,10),
+          'deposito.resolucion': { estado: estado, montoRetenido: montoRetenido, nota: nota, fecha: new Date().toISOString().slice(0,10) }
+        }).then(function(){ toast('Consultorio liberado y depósito registrado.'); closeModal(); })
+          .catch(function(err){ console.error(err); toast('No se pudo guardar. Intenta de nuevo.'); });
+      };
+    }
+    draw();
+  }
+
   function confirmDeleteAlquiler(rentalId){
     var a = state.alquileres.find(function(x){return x.id===rentalId;});
     if (!a) return;
@@ -1672,9 +1970,12 @@
     } : {
       editId: null,
       consultorioId: opts.consultorioId || '',
-      modalidad: opts.dia ? 'dia' : 'completo',
+      modalidad: (opts.modalidadInteres === 'dia' || opts.dia) ? 'dia' : 'completo',
       dias: opts.dia ? [opts.dia] : [],
-      nombre:'', especialidad:'', telefono:'', email:'',
+      nombre: (opts.prefill && opts.prefill.nombre) || '',
+      especialidad: (opts.prefill && opts.prefill.especialidad) || '',
+      telefono: (opts.prefill && opts.prefill.telefono) || '',
+      email: (opts.prefill && opts.prefill.email) || '',
       nacionalidad:'', cedula:'', domicilio:'',
       precio:'', fecha: new Date().toISOString().slice(0,10),
       diaPago:'1', depositoDado:false, depositoMonto:'',
@@ -1842,7 +2143,11 @@
         payload.creadoEn = new Date().toISOString();
         op = db.collection('alquileres').add(payload);
       }
-      op.then(function(){ toast(isEdit ? 'Alquiler actualizado.' : 'Alquiler registrado correctamente.'); closeModal(); })
+      op.then(function(){
+        toast(isEdit ? 'Alquiler actualizado.' : 'Alquiler registrado correctamente.');
+        closeModal();
+        if (typeof opts.onSuccess === 'function') opts.onSuccess();
+      })
         .catch(function(err){ modalState.error = 'No se pudo guardar. Intenta de nuevo.'; draw(); console.error(err); });
     }
 

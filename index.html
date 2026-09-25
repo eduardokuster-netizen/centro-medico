@@ -218,8 +218,9 @@
       <button data-view="cobros"><span class="num">05</span>Cobros del mes</button>
       <button data-view="compartir"><span class="num">06</span>Compartir con doctores</button>
       <button data-view="rentabilidad"><span class="num">07</span>Rentabilidad</button>
+      <button data-view="contratos"><span class="num">08</span>Contratos</button>
     </nav>
-    <div class="sidebar-foot">Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.02</span></div>
+    <div class="sidebar-foot">Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.03</span></div>
   </aside>
 
   <main class="main" id="main">
@@ -246,7 +247,9 @@
     consultorios: [],
     alquileres: [],
     pagos: {},
-    config: { telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'' },
+    config: { telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'',
+      nombreArrendador:'', nacionalidadArrendador:'', cedulaArrendador:'', domicilioArrendador:'',
+      descripcionInmueble:'', serviciosIncluidos:'', ciudadFirma:'Santo Domingo de Guzmán, Distrito Nacional', duracionContrato:'un (1) año calendario' },
     loaded: { consultorios:false, alquileres:false, pagos:false, config:false },
     search: '',
   };
@@ -269,6 +272,52 @@
   function dayLabel(k){ var d = DIAS.find(function(x){return x.k===k;}); return d ? d.short : k; }
   function getDias(r){ return (r.dias && r.dias.length) ? r.dias : (r.dia ? [r.dia] : []); }
   var MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  function fechaLarga(iso){
+    if (!iso) return '____________';
+    var d = new Date(iso + 'T00:00:00');
+    if (isNaN(d.getTime())) return '____________';
+    return d.getDate() + ' de ' + MESES_ES[d.getMonth()] + ' del ' + d.getFullYear();
+  }
+  function diaPagoTexto(diaPago){
+    return String(diaPago) === '15' ? 'QUINCE (15)' : 'PRIMERO (1)';
+  }
+  /** Spanish number-to-words for whole peso amounts, uppercase, legal-document style. */
+  function numeroALetras(n){
+    n = Math.round(Number(n)||0);
+    if (n === 0) return 'CERO';
+    var UNIDADES = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
+    var ESPECIALES = ['DIEZ','ONCE','DOCE','TRECE','CATORCE','QUINCE','DIECISÉIS','DIECISIETE','DIECIOCHO','DIECINUEVE'];
+    var DECENAS = ['','DIEZ','VEINTE','TREINTA','CUARENTA','CINCUENTA','SESENTA','SETENTA','OCHENTA','NOVENTA'];
+    var CENTENAS = ['','CIENTO','DOSCIENTOS','TRESCIENTOS','CUATROCIENTOS','QUINIENTOS','SEISCIENTOS','SETECIENTOS','OCHOCIENTOS','NOVECIENTOS'];
+    var VEINTI = {1:'VEINTIÚN',2:'VEINTIDÓS',3:'VEINTITRÉS',4:'VEINTICUATRO',5:'VEINTICINCO',6:'VEINTISÉIS',7:'VEINTISIETE',8:'VEINTIOCHO',9:'VEINTINUEVE'};
+    function tresDigitos(num){
+      num = num % 1000;
+      if (num === 0) return '';
+      if (num === 100) return 'CIEN';
+      var c = Math.floor(num/100), resto = num%100, out = [];
+      if (c>0) out.push(CENTENAS[c]);
+      if (resto>0){
+        if (resto<10) out.push(UNIDADES[resto]);
+        else if (resto<20) out.push(ESPECIALES[resto-10]);
+        else {
+          var d = Math.floor(resto/10), u = resto%10;
+          if (d===2) out.push(u>0 ? VEINTI[u] : 'VEINTE');
+          else if (u>0) out.push(DECENAS[d] + ' Y ' + UNIDADES[u]);
+          else out.push(DECENAS[d]);
+        }
+      }
+      return out.join(' ');
+    }
+    var millones = Math.floor(n/1000000);
+    var miles = Math.floor((n%1000000)/1000);
+    var cientos = n%1000;
+    var partes = [];
+    if (millones>0) partes.push(millones===1 ? 'UN MILLÓN' : tresDigitos(millones)+' MILLONES');
+    if (miles>0) partes.push(miles===1 ? 'MIL' : tresDigitos(miles)+' MIL');
+    if (cientos>0) partes.push(tresDigitos(cientos));
+    return partes.join(' ').trim();
+  }
+  function montoEnLetras(n){ return numeroALetras(n) + ' 00/100 PESOS DOMINICANOS'; }
   function periodLabel(key){
     var parts = key.split('-'); var y = Number(parts[0]), m = Number(parts[1])-1;
     return MESES_ES[m] + ' ' + y;
@@ -408,7 +457,10 @@
     }, function(err){ console.error(err); });
 
     db.doc('config/centro').onSnapshot(function(snap){
-      if (snap.exists) state.config = Object.assign({telefonoContacto:'', emailContacto:'', mensajeRecordatorio:''}, snap.data());
+      if (snap.exists) state.config = Object.assign({telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'',
+        nombreArrendador:'', nacionalidadArrendador:'', cedulaArrendador:'', domicilioArrendador:'',
+        descripcionInmueble:'', serviciosIncluidos:'', ciudadFirma:'Santo Domingo de Guzmán, Distrito Nacional', duracionContrato:'un (1) año calendario'
+      }, snap.data());
       state.loaded.config = true;
       render();
     }, function(err){ console.error(err); });
@@ -506,6 +558,7 @@
     else if (state.view === 'cobros') main.innerHTML = renderCobros();
     else if (state.view === 'compartir') main.innerHTML = renderCompartir();
     else if (state.view === 'rentabilidad') main.innerHTML = renderRentabilidad();
+    else if (state.view === 'contratos') main.innerHTML = renderContratos();
     bindViewEvents();
     if (state.view === 'rentabilidad') setTimeout(drawRentabilidadCharts, 0);
   }
@@ -931,6 +984,133 @@
     + '</div>';
   }
 
+  function renderContratos(){
+    var cfg = state.config;
+    var roomName = function(id){ var c = state.consultorios.find(function(x){return String(x.id)===String(id);}); return c ? c.nombre : ('Consultorio ' + id); };
+    var rows = state.alquileres.slice().sort(function(a,b){
+      if (a.activo === b.activo) return (a.especialista.nombre||'').localeCompare(b.especialista.nombre||'');
+      return a.activo === false ? 1 : -1;
+    });
+
+    return ''
+    + '<div class="view-head"><div><h2>Contratos</h2><p>Genera el contrato de arrendamiento de cada especialista listo para imprimir y firmar, usando los datos ya registrados.</p></div></div>'
+    + '<div class="card" style="margin-bottom:1.2rem"><div class="card-head"><h3>Datos del arrendador (dueño/a del centro)</h3></div><div class="card-body">'
+    +   '<div class="row2">'
+    +     '<div class="field"><label>Nombre completo</label><input id="cfg-arr-nombre" value="' + escapeHtml(cfg.nombreArrendador) + '" placeholder="Nombre y apellidos"></div>'
+    +     '<div class="field"><label>Nacionalidad</label><input id="cfg-arr-nac" value="' + escapeHtml(cfg.nacionalidadArrendador) + '" placeholder="Dominicana"></div>'
+    +   '</div>'
+    +   '<div class="row2">'
+    +     '<div class="field"><label>Cédula</label><input id="cfg-arr-cedula" value="' + escapeHtml(cfg.cedulaArrendador) + '" placeholder="000-0000000-0"></div>'
+    +     '<div class="field"><label>Domicilio</label><input id="cfg-arr-domicilio" value="' + escapeHtml(cfg.domicilioArrendador) + '" placeholder="Calle, sector, ciudad"></div>'
+    +   '</div>'
+    + '</div></div>'
+    + '<div class="card" style="margin-bottom:1.2rem"><div class="card-head"><h3>Datos del inmueble y del contrato</h3></div><div class="card-body">'
+    +   '<div class="field"><label>Descripción del inmueble</label><input id="cfg-inmueble" value="' + escapeHtml(cfg.descripcionInmueble) + '" placeholder="Inmueble ubicado en la calle..., Santo Domingo"></div>'
+    +   '<div class="field"><label>Servicios incluidos en el alquiler</label><input id="cfg-servicios" value="' + escapeHtml(cfg.serviciosIncluidos) + '" placeholder="limpieza, energía eléctrica, aire acondicionado, secretaria, baño para pacientes, sala de espera y seguridad"></div>'
+    +   '<div class="row2">'
+    +     '<div class="field"><label>Ciudad para la firma</label><input id="cfg-ciudad" value="' + escapeHtml(cfg.ciudadFirma) + '"></div>'
+    +     '<div class="field"><label>Duración del contrato</label><input id="cfg-duracion" value="' + escapeHtml(cfg.duracionContrato) + '"></div>'
+    +   '</div>'
+    + '</div></div>'
+    + '<div class="card"><div class="card-head"><h3>Generar contrato por especialista</h3></div><div class="card-body">'
+    + (rows.length === 0 ? '<p class="empty-note">Aún no hay alquileres registrados.</p>' :
+      '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Modalidad</th><th>Estado</th><th></th></tr></thead><tbody>'
+      + rows.map(function(a){
+          var modTag = a.modalidad === 'completo' ? 'Completo' : getDias(a).map(dayLabel).join(', ');
+          var faltan = !a.especialista.cedula || !a.especialista.domicilio;
+          return '<tr>'
+          + '<td>' + escapeHtml(a.especialista.nombre) + '</td>'
+          + '<td>' + escapeHtml(roomName(a.consultorioId)) + '</td>'
+          + '<td>' + modTag + '</td>'
+          + '<td>' + (a.activo === false ? '<span style="color:var(--ink-soft)">Finalizado</span>' : '<span style="color:var(--moss)">Activo</span>') + '</td>'
+          + '<td>' + (faltan
+                ? '<span class="tag off">Falta cédula/domicilio — edítalo en Editar</span>'
+                : '<button class="btn small" data-contrato="' + a.id + '">Generar contrato</button>')
+          + '</td>'
+          + '</tr>';
+        }).join('')
+      + '</tbody></table>')
+    + '</div></div>';
+  }
+
+  function buildContratoHtml(rental, consultorio){
+    var cfg = state.config;
+    var esp = rental.especialista;
+    var esDia = rental.modalidad === 'dia';
+    var equipo = (consultorio.equipamiento && consultorio.equipamiento.trim()) || 'escritorio, silla principal y silla para paciente';
+    var servicios = cfg.serviciosIncluidos || 'limpieza, energía eléctrica, aire acondicionado, secretaria, baño para pacientes, sala de espera y seguridad';
+    var inmueble = cfg.descripcionInmueble || '____________________________________________';
+    var ciudad = cfg.ciudadFirma || 'Santo Domingo, Distrito Nacional';
+    var duracion = cfg.duracionContrato || 'un (1) año calendario';
+
+    var modalidadTexto = esDia
+      ? 'ARRENDAR EL USO DE UN CONSULTORIO POR DÍA(S) ESPECÍFICOS DE LA SEMANA dentro del inmueble descrito precedentemente. Dicho consultorio tiene ' + equipo + '. Está asignado con el número ' + consultorio.pisoNumero + ' en nivel ' + consultorio.piso + ', para uso exclusivo de LA ARRENDATARIA los días ' + getDias(rental).map(dayLabel).join(', ') + ' de cada semana'
+      : 'ALQUILAR UN CONSULTORIO COMPLETO dentro del inmueble descrito precedentemente. Dicho consultorio tiene ' + equipo + '. Está asignado con el número ' + consultorio.pisoNumero + ' en nivel ' + consultorio.piso;
+
+    var depositoParrafo = (rental.deposito && rental.deposito.dado && Number(rental.deposito.monto) > 0)
+      ? 'LA ARRENDATARIA entrega a LA ARRENDADORA la suma de (' + Number(rental.deposito.monto) + ') ' + montoEnLetras(rental.deposito.monto) + ' por concepto de depósito, y que se usará para asegurar su tiempo de por lo menos más de 6 meses, sino este se perderá. Superado los 6 meses, si desea culminar el contrato se reintegrará el depósito completo. Esta suma que LA ARRENDADORA declara haber recibido, de manos de LA ARRENDATARIA. DE NO CUMPLIR EL CONTRATO ESTE MONTO (DEPÓSITO) SERÁ LA PENALIDAD.'
+      : 'Al momento de la firma del presente contrato, LA ARRENDATARIA no ha entregado depósito en garantía.';
+
+    var nombreArr = cfg.nombreArrendador || '____________________________';
+    var nacArr = cfg.nacionalidadArrendador || '____________';
+    var cedArr = cfg.cedulaArrendador || '___-_______-_';
+    var domArr = cfg.domicilioArrendador || '____________________________';
+
+    var body = ''
+    + '<p class="center"><strong>CONTRATO DE ARRENDAMIENTO DE INMUEBLE</strong></p>'
+    + '<p class="center underline"><strong>DECLARACIONES.</strong></p>'
+    + '<p><strong>ENTRE</strong>: De una parte, <strong>' + escapeHtml(nombreArr) + '</strong>, ' + escapeHtml(nacArr) + ', Residente de República Dominicana bajo la Cédula número ' + escapeHtml(cedArr) + ', domiciliada en ' + escapeHtml(domArr) + '; quien en lo que sigue de este contrato se denominará <strong>"LA ARRENDADORA"</strong>, o por su propio nombre;</p>'
+    + '<p>De otra parte, <strong>' + escapeHtml(esp.nombre.toUpperCase()) + '</strong>, ' + escapeHtml((esp.nacionalidad||'____________').toUpperCase()) + ', de <strong>CÉDULA</strong> número <strong>' + escapeHtml(esp.cedula||'___-_______-_') + '</strong>, domiciliada en <strong>' + escapeHtml(esp.domicilio||'____________________________') + '</strong>; quien en lo que sigue del presente contrato se denominará <strong>"LA ARRENDATARIA"</strong> o por su propio nombre.</p>'
+    + '<p><strong>LA ARRENDADORA</strong> y <strong>LA ARRENDATARIA</strong>, en lo adelante de este contrato, serán referidas conjuntamente como <strong>Las Partes</strong>.</p>'
+    + '<p class="center underline"><strong>PREÁMBULO.</strong></p>'
+    + '<p><span class="underline"><strong>POR CUANTO:</strong></span> <strong>LA ARRENDADORA</strong> es inquilina de un inmueble, descrito a continuación (en lo adelante <strong>"EL INMUEBLE"</strong>): "' + escapeHtml(inmueble) + '"</p>'
+    + '<p><span class="underline"><strong>POR CUANTO:</strong></span> A que <strong>LA ARRENDATARIA</strong> tiene la intención de ' + modalidadTexto + '.</p>'
+    + '<p><span class="underline"><strong>POR CUANTO:</strong></span> A que <strong>LAS PARTES</strong> están interesadas en suscribir el presente contrato de arrendamiento del referido consultorio, de conformidad a los términos y condiciones que se especifican más adelante en el presente contrato.</p>'
+    + '<p class="center underline"><strong>HAN CONVENIDO Y PACTADO LO SIGUIENTE</strong></p>'
+    + '<p><strong>LA ARRENDATARIA</strong> se compromete a pagar de forma mensual por concepto de alquiler o fracción de mes por adelantado, la suma de <strong>' + montoEnLetras(rental.precioMensual) + '</strong> (RD$' + money(rental.precioMensual).replace('RD$ ','') + '). Este monto incluye los servicios de ' + escapeHtml(servicios) + '. <strong>LAS PARTES</strong> acuerdan que el pago de la referida cuota mensual de alquiler iniciará el día ' + fechaLarga(rental.fechaInicio) + '.</p>'
+    + '<p>' + depositoParrafo + ' Por tanto, <strong>LA ARRENDATARIA</strong> reconoce y acepta que deberá continuar con su obligación de pago del precio de alquiler, el día ' + diaPagoTexto(rental.diaPago) + ' de cada mes.</p>'
+    + '<p><strong>LA ARRENDATARIA</strong> será el único responsable por cualquier daño ocasionado a <strong>EL CONSULTORIO</strong> durante el tiempo de vigencia del Contrato de Alquiler durante su turno. De igual forma, <strong>LA ARRENDATARIA</strong> será responsable por la pérdida sufrida sobre los objetos que permanezcan dentro del inmueble alquilado, como consecuencia de robo, incendio e inundaciones, siempre que dichas inundaciones no sean imputadas a <strong>LA ARRENDADORA</strong> propiamente.</p>'
+    + '<p><strong>LA ARRENDADORA</strong> y <strong>LA ARRENDATARIA</strong> se liberan mutuamente de toda responsabilidad de cualquier daño o pérdida sufrida sobre los objetos que permanezcan dentro del CONSULTORIO alquilado, como consecuencia de terremoto, guerra civil, cataclismo, y motines.</p>'
+    + '<p><strong>LAS PARTES</strong> reconocen y aceptan que el Contrato de Alquiler tendrá una duración de ' + escapeHtml(duracion) + ', a partir del ' + fechaLarga(rental.fechaInicio) + '.</p>'
+    + '<p><strong>Firmado al ' + fechaLarga(rental.fechaInicio) + '</strong>, en la ciudad de ' + escapeHtml(ciudad) + '.</p>'
+    + '<table class="firmas"><tr>'
+    +   '<td><div class="linea"></div><strong>' + escapeHtml(nombreArr) + '</strong><br>LA ARRENDADORA</td>'
+    +   '<td><div class="linea"></div><strong>' + escapeHtml(esp.nombre.toUpperCase()) + '</strong><br>LA ARRENDATARIA</td>'
+    + '</tr></table>';
+
+    return '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">'
+      + '<title>Contrato — ' + escapeHtml(esp.nombre) + '</title>'
+      + '<style>'
+      + '@page { size: letter; margin: 2.2cm 2.5cm; }'
+      + "body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.5;color:#111;max-width:820px;margin:0 auto;padding:2rem 1.5rem;}"
+      + 'p{text-align:justify;margin:0 0 .9em;}'
+      + '.center{text-align:center;}'
+      + '.underline{text-decoration:underline;}'
+      + 'table.firmas{width:100%;margin-top:3.5rem;border-collapse:collapse;}'
+      + 'table.firmas td{width:50%;text-align:center;padding-top:0;}'
+      + '.linea{border-top:1px solid #111;width:80%;margin:0 auto 2.8rem;}'
+      + '.toolbar-print{position:sticky;top:0;background:#F3F1F7;padding:.8rem 1rem;text-align:center;border-bottom:1px solid #ccc;margin-bottom:1rem;}'
+      + '.toolbar-print button{font-family:sans-serif;font-size:.9rem;font-weight:600;padding:.55rem 1.1rem;border-radius:4px;border:1px solid #3A3448;background:#3A3448;color:#fff;cursor:pointer;}'
+      + '@media print { .toolbar-print{ display:none; } body{ padding:0; max-width:none; } }'
+      + '</style></head><body>'
+      + '<div class="toolbar-print"><button onclick="window.print()">Imprimir / Guardar como PDF</button></div>'
+      + body
+      + '</body></html>';
+  }
+
+  function openContratoWindow(rentalId){
+    var a = state.alquileres.find(function(x){return x.id===rentalId;});
+    if (!a) return;
+    var c = state.consultorios.find(function(x){ return String(x.id)===String(a.consultorioId); });
+    if (!c){ toast('No se encontró el consultorio de este alquiler.'); return; }
+    var w = window.open('', '_blank');
+    if (!w){ toast('El navegador bloqueó la ventana. Permite ventanas emergentes para este sitio.'); return; }
+    w.document.open();
+    w.document.write(buildContratoHtml(a, c));
+    w.document.close();
+  }
+
+
   function drawRentabilidadCharts(){
     if (typeof Chart === 'undefined') return;
     var rooms = [];
@@ -1025,6 +1205,17 @@
     var cfgEmail = document.getElementById('cfg-email');
     if (cfgTel) cfgTel.onchange = function(e){ db.doc('config/centro').set(Object.assign({}, state.config, {telefonoContacto: e.target.value})); };
     if (cfgEmail) cfgEmail.onchange = function(e){ db.doc('config/centro').set(Object.assign({}, state.config, {emailContacto: e.target.value})); };
+
+    [['cfg-arr-nombre','nombreArrendador'],['cfg-arr-nac','nacionalidadArrendador'],['cfg-arr-cedula','cedulaArrendador'],['cfg-arr-domicilio','domicilioArrendador'],
+     ['cfg-inmueble','descripcionInmueble'],['cfg-servicios','serviciosIncluidos'],['cfg-ciudad','ciudadFirma'],['cfg-duracion','duracionContrato']].forEach(function(pair){
+      var el = document.getElementById(pair[0]);
+      if (!el) return;
+      el.onchange = function(e){
+        var patch = {}; patch[pair[1]] = e.target.value;
+        db.doc('config/centro').set(Object.assign({}, state.config, patch)).catch(function(err){ console.error(err); toast('No se pudo guardar.'); });
+      };
+    });
+    main.querySelectorAll('[data-contrato]').forEach(function(b){ b.onclick = function(){ openContratoWindow(b.dataset.contrato); }; });
 
     var btnDl = document.getElementById('btn-download-share');
     if (btnDl) btnDl.onclick = function(){
@@ -1214,6 +1405,7 @@
       +       '<div class="field"><label>Precio sugerido — por día/mes</label><input id="f-td" type="number" min="0" value="' + (c.precioDia||'') + '"></div>'
       +     '</div>'
       +     '<div class="field"><label>Metros cuadrados (m²)</label><input id="f-m2" type="number" min="0" value="' + (c.metrosCuadrados||'') + '"></div>'
+      +     '<div class="field"><label>Equipamiento (para el contrato)</label><input id="f-equipo" value="' + escapeHtml(c.equipamiento||'') + '" placeholder="escritorio, silla principal y silla para paciente"></div>'
       +     '<div class="field"><label>Modalidades disponibles para ofrecer</label>'
       +       '<div class="field checkline"><input type="checkbox" id="f-hab-completo" ' + (completoHabilitado(c)?'checked':'') + '><label for="f-hab-completo">Ofrecer modalidad "consultorio completo"</label></div>'
       +       '<div class="field checkline"><input type="checkbox" id="f-hab-dia" ' + (diaHabilitado(c)?'checked':'') + '><label for="f-hab-dia">Ofrecer modalidad "por día"</label></div>'
@@ -1231,6 +1423,7 @@
         precioCompleto: Number(document.getElementById('f-tc').value)||0,
         precioDia: Number(document.getElementById('f-td').value)||0,
         metrosCuadrados: Number(document.getElementById('f-m2').value)||0,
+        equipamiento: document.getElementById('f-equipo').value.trim(),
         modalidadCompletoHabilitada: document.getElementById('f-hab-completo').checked,
         modalidadDiaHabilitada: document.getElementById('f-hab-dia').checked
       }).then(function(){ toast('Detalles del consultorio actualizados.'); closeModal(); })
@@ -1254,7 +1447,7 @@
   }
 
   function openNuevoConsultorioModal(){
-    var ns = { piso:'1', pisoNumero:'', metros:'', precioCompleto:'', precioDia:'', habCompleto:true, habDia:true, error:'' };
+    var ns = { piso:'1', pisoNumero:'', metros:'', equipamiento:'', precioCompleto:'', precioDia:'', habCompleto:true, habDia:true, error:'' };
     function draw(){
       var root = document.getElementById('modal-root');
       root.innerHTML = ''
@@ -1274,6 +1467,7 @@
         +       '<div class="field"><label>Precio sugerido — por día/mes (opcional)</label><input id="nf-td" type="number" min="0" value="'+escapeHtml(ns.precioDia)+'"></div>'
         +     '</div>'
         +     '<div class="field"><label>Metros cuadrados (m², opcional)</label><input id="nf-m2" type="number" min="0" value="'+escapeHtml(ns.metros)+'"></div>'
+        +     '<div class="field"><label>Equipamiento (opcional, para el contrato)</label><input id="nf-equipo" value="'+escapeHtml(ns.equipamiento||'')+'" placeholder="escritorio, silla principal y silla para paciente"></div>'
         +     '<div class="field"><label>Modalidades disponibles</label>'
         +       '<div class="field checkline"><input type="checkbox" id="nf-hab-completo" ' + (ns.habCompleto?'checked':'') + '><label for="nf-hab-completo">Ofrecer modalidad "consultorio completo"</label></div>'
         +       '<div class="field checkline"><input type="checkbox" id="nf-hab-dia" ' + (ns.habDia?'checked':'') + '><label for="nf-hab-dia">Ofrecer modalidad "por día"</label></div>'
@@ -1290,6 +1484,7 @@
       document.getElementById('nf-tc').oninput = function(e){ ns.precioCompleto = e.target.value; };
       document.getElementById('nf-td').oninput = function(e){ ns.precioDia = e.target.value; };
       document.getElementById('nf-m2').oninput = function(e){ ns.metros = e.target.value; };
+      document.getElementById('nf-equipo').oninput = function(e){ ns.equipamiento = e.target.value; };
       document.getElementById('nf-hab-completo').onchange = function(e){ ns.habCompleto = e.target.checked; };
       document.getElementById('nf-hab-dia').onchange = function(e){ ns.habDia = e.target.checked; };
       document.getElementById('nf-save').onclick = save;
@@ -1308,6 +1503,7 @@
         precioCompleto: Number(ns.precioCompleto)||0,
         precioDia: Number(ns.precioDia)||0,
         metrosCuadrados: Number(ns.metros)||0,
+        equipamiento: (ns.equipamiento||'').trim(),
         modalidadCompletoHabilitada: ns.habCompleto,
         modalidadDiaHabilitada: ns.habDia,
         notas: ''
@@ -1329,6 +1525,7 @@
       modalidad: er.modalidad,
       dias: er.modalidad === 'dia' ? getDias(er).slice() : [],
       nombre: er.especialista.nombre, especialidad: er.especialista.especialidad||'', telefono: er.especialista.telefono||'', email: er.especialista.email||'',
+      nacionalidad: er.especialista.nacionalidad||'', cedula: er.especialista.cedula||'', domicilio: er.especialista.domicilio||'',
       precio: er.precioMensual ? String(er.precioMensual) : '', fecha: er.fechaInicio || new Date().toISOString().slice(0,10),
       diaPago: er.diaPago || '1', depositoDado: !!(er.deposito && er.deposito.dado), depositoMonto: (er.deposito && er.deposito.monto) ? String(er.deposito.monto) : '',
       error: ''
@@ -1338,6 +1535,7 @@
       modalidad: opts.dia ? 'dia' : 'completo',
       dias: opts.dia ? [opts.dia] : [],
       nombre:'', especialidad:'', telefono:'', email:'',
+      nacionalidad:'', cedula:'', domicilio:'',
       precio:'', fecha: new Date().toISOString().slice(0,10),
       diaPago:'1', depositoDado:false, depositoMonto:'',
       error: ''
@@ -1395,6 +1593,13 @@
       +       '<div class="field"><label>Especialidad</label><input id="f-especialidad" value="'+escapeHtml(modalState.especialidad)+'" placeholder="Cardiología"></div>'
       +     '</div>'
       +     '<div class="row2">'
+      +       '<div class="field"><label>Nacionalidad</label><input id="f-nacionalidad" value="'+escapeHtml(modalState.nacionalidad)+'" placeholder="Dominicana"></div>'
+      +       '<div class="field"><label>Cédula</label><input id="f-cedula" value="'+escapeHtml(modalState.cedula)+'" placeholder="000-0000000-0"></div>'
+      +     '</div>'
+      +     '<div class="field"><label>Domicilio</label><input id="f-domicilio" value="'+escapeHtml(modalState.domicilio)+'" placeholder="Calle, sector, ciudad">'
+      +       '<div class="hint">Nacionalidad, cédula y domicilio se usan para generar el contrato de alquiler.</div>'
+      +     '</div>'
+      +     '<div class="row2">'
       +       '<div class="field"><label>Teléfono</label><input id="f-telefono" value="'+escapeHtml(modalState.telefono)+'" placeholder="809-000-0000"></div>'
       +       '<div class="field"><label>Email (opcional)</label><input id="f-email" value="'+escapeHtml(modalState.email)+'" placeholder="correo@ejemplo.com"></div>'
       +     '</div>'
@@ -1442,10 +1647,10 @@
         };
       });
 
-      ['f-nombre','f-especialidad','f-telefono','f-email','f-precio','f-fecha','f-dep-monto'].forEach(function(id){
+      ['f-nombre','f-especialidad','f-telefono','f-email','f-nacionalidad','f-cedula','f-domicilio','f-precio','f-fecha','f-dep-monto'].forEach(function(id){
         var el = document.getElementById(id);
         if (!el) return;
-        var key = {'f-nombre':'nombre','f-especialidad':'especialidad','f-telefono':'telefono','f-email':'email','f-precio':'precio','f-fecha':'fecha','f-dep-monto':'depositoMonto'}[id];
+        var key = {'f-nombre':'nombre','f-especialidad':'especialidad','f-telefono':'telefono','f-email':'email','f-nacionalidad':'nacionalidad','f-cedula':'cedula','f-domicilio':'domicilio','f-precio':'precio','f-fecha':'fecha','f-dep-monto':'depositoMonto'}[id];
         el.oninput = function(e){ modalState[key] = e.target.value; };
       });
       document.getElementById('f-dep-check').onchange = function(e){ modalState.depositoDado = e.target.checked; draw(); };
@@ -1476,7 +1681,7 @@
     }
 
     function persist(){
-      var especialista = { nombre: modalState.nombre.trim(), especialidad: modalState.especialidad.trim(), telefono: modalState.telefono.trim(), email: modalState.email.trim() };
+      var especialista = { nombre: modalState.nombre.trim(), especialidad: modalState.especialidad.trim(), telefono: modalState.telefono.trim(), email: modalState.email.trim(), nacionalidad: modalState.nacionalidad.trim(), cedula: modalState.cedula.trim(), domicilio: modalState.domicilio.trim() };
       var deposito = { dado: !!modalState.depositoDado, monto: modalState.depositoDado ? Number(modalState.depositoMonto)||0 : 0 };
       var payload = {
         consultorioId: modalState.consultorioId,

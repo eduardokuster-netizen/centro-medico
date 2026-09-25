@@ -224,7 +224,7 @@
     </nav>
     <div class="sidebar-foot">
       <button id="btn-logout" class="btn ghost small" style="width:100%;margin-bottom:.6rem">Cerrar sesión</button>
-      Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.08</span>
+      Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.09</span>
     </div>
   </aside>
 
@@ -258,6 +258,7 @@
       descripcionInmueble:'', serviciosIncluidos:'', ciudadFirma:'Santo Domingo de Guzmán, Distrito Nacional', duracionContrato:'un (1) año calendario', duracionContratoMeses:12 },
     loaded: { consultorios:false, alquileres:false, pagos:false, config:false, solicitudes:false },
     search: '',
+    contratosSub: 'generar',
   };
   var charts = { ingresos:null, distribucion:null, tendencia:null };
 
@@ -359,10 +360,14 @@
     var pendientes = periods.filter(function(p){ var pg = state.pagos[rental.id+'__'+p.key]; return !(pg && pg.pagado); });
     return { totalPeriodos: periods.length, pendientes: pendientes, mesesPendientes: pendientes.length, monto: pendientes.length * (Number(rental.precioMensual)||0) };
   }
-  /** Contract end date = fechaInicio + duracionContratoMeses (config, default 12). */
+  /** Contract end date = start of CURRENT contract term + duracionContratoMeses.
+   * Uses fechaInicioContrato (reset on each renewal) when present, falling back to
+   * fechaInicio for rentals never renewed — fechaInicio itself is never touched by a
+   * renewal, so billing cycles and revenue history stay correct across renewals. */
   function fechaVencimientoContrato(rental){
-    if (!rental.fechaInicio) return null;
-    var start = new Date(rental.fechaInicio + 'T00:00:00');
+    var base = rental.fechaInicioContrato || rental.fechaInicio;
+    if (!base) return null;
+    var start = new Date(base + 'T00:00:00');
     if (isNaN(start.getTime())) return null;
     var meses = Number(state.config.duracionContratoMeses) || 12;
     return new Date(start.getFullYear(), start.getMonth() + meses, start.getDate());
@@ -381,6 +386,29 @@
       .map(function(a){ return { a:a, dias: diasParaVencerContrato(a), venc: fechaVencimientoContrato(a) }; })
       .filter(function(x){ return x.dias !== null && x.dias <= 60; })
       .sort(function(x,y){ return x.dias - y.dias; });
+  }
+  /** Calendar-accurate months+days between two dates (end - start), e.g. 14 months, 6 days. */
+  function diffMesesDias(start, end){
+    var months = (end.getFullYear()-start.getFullYear())*12 + (end.getMonth()-start.getMonth());
+    var tmp = new Date(start.getFullYear(), start.getMonth()+months, start.getDate());
+    if (tmp > end){ months--; tmp = new Date(start.getFullYear(), start.getMonth()+months, start.getDate()); }
+    var dias = Math.round((end - tmp) / 86400000);
+    var totalDias = Math.round((end - start) / 86400000);
+    return { meses: months, dias: dias, totalDias: totalDias };
+  }
+  /** How long a rental has been with the center: fechaInicio → fechaFin (or today). */
+  function tiempoConNosotros(rental){
+    if (!rental.fechaInicio) return null;
+    var start = new Date(rental.fechaInicio + 'T00:00:00');
+    if (isNaN(start.getTime())) return null;
+    var end = rental.fechaFin ? new Date(rental.fechaFin + 'T00:00:00') : new Date();
+    if (end < start) end = start;
+    return diffMesesDias(start, end);
+  }
+  function tiempoTexto(t){
+    if (!t) return '—';
+    if (t.meses <= 0) return t.totalDias + ' día(s)';
+    return t.meses + ' mes(es), ' + t.dias + ' día(s)';
   }
   var DEFAULT_MENSAJE_RECORDATORIO = 'Hola {nombre}, le recordamos que tiene {meses} mes(es) de alquiler pendiente(s) por un total de {monto}, correspondiente a su consultorio ({consultorio}). Le agradecemos regularizar el pago a la mayor brevedad. ¡Gracias!';
   var DEFAULT_MENSAJE_AMIGABLE = '\u00a1Hola {nombre}! \u263a Solo un recordatorio amigable de que el pago de tu alquiler de este mes ({monto}, {consultorio}) sigue pendiente. Si ya lo hiciste, \u00a1mil gracias, ignora este mensaje! Cualquier cosa que necesites, aqu\u00ed estamos. \u00a1Que tengas un excelente d\u00eda!';
@@ -864,7 +892,7 @@
     + '<div class="toolbar"><input class="search-input" id="esp-search" placeholder="Buscar por nombre o especialidad…" value="' + escapeHtml(state.search) + '"></div>'
     + '<div class="card"><div class="card-body">'
     + (rows.length === 0 ? '<p class="empty-note">Aún no hay alquileres registrados.</p>' :
-      '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Modalidad</th><th>Precio/mes</th><th>Día de pago</th><th>Depósito</th><th>Estado</th><th></th></tr></thead><tbody>'
+      '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Modalidad</th><th>Precio/mes</th><th>Día de pago</th><th>Tiempo con nosotros</th><th>Depósito</th><th>Estado</th><th></th></tr></thead><tbody>'
       + rows.map(function(a){
           var modTag = a.modalidad === 'completo' ? '<span class="tag completo">Completo</span>' : '<span class="tag dia">' + getDias(a).map(dayLabel).join(', ') + '</span>';
           var dep;
@@ -891,6 +919,7 @@
           + '<td>' + modTag + '</td>'
           + '<td class="mono">' + money(a.precioMensual) + '</td>'
           + '<td class="mono">Día ' + escapeHtml(a.diaPago||'1') + '</td>'
+          + '<td>' + tiempoTexto(tiempoConNosotros(a)) + '</td>'
           + '<td>' + dep + '</td>'
           + '<td>' + (a.activo === false ? '<span style="color:var(--ink-soft)">Finalizado</span>' : '<span style="color:var(--moss)">Activo</span>') + '</td>'
           + '<td>' + acciones + '</td>'
@@ -1166,7 +1195,16 @@
 
   function renderContratos(){
     var cfg = state.config;
+    var sub = state.contratosSub || 'generar';
     var roomName = function(id){ var c = state.consultorios.find(function(x){return String(x.id)===String(id);}); return c ? c.nombre : ('Consultorio ' + id); };
+
+    var subnav = '<div class="btn-row" style="margin-bottom:1.4rem">'
+      + '<button class="btn ' + (sub==='generar'?'':'ghost') + ' small" data-contratos-sub="generar">Generar contratos</button>'
+      + '<button class="btn ' + (sub==='tiempo'?'':'ghost') + ' small" data-contratos-sub="tiempo">Tiempo de contrato</button>'
+      + '</div>';
+
+    if (sub === 'tiempo') return renderContratosTiempo(subnav, roomName);
+
     var rows = state.alquileres.slice().sort(function(a,b){
       if (a.activo === b.activo) return (a.especialista.nombre||'').localeCompare(b.especialista.nombre||'');
       return a.activo === false ? 1 : -1;
@@ -1174,6 +1212,7 @@
 
     return ''
     + '<div class="view-head"><div><h2>Contratos</h2><p>Genera el contrato de arrendamiento de cada especialista listo para imprimir y firmar, usando los datos ya registrados.</p></div></div>'
+    + subnav
     + '<div class="card" style="margin-bottom:1.2rem"><div class="card-head"><h3>Datos del arrendador (dueño/a del centro)</h3></div><div class="card-body">'
     +   '<div class="row2">'
     +     '<div class="field"><label>Nombre completo</label><input id="cfg-arr-nombre" value="' + escapeHtml(cfg.nombreArrendador) + '" placeholder="Nombre y apellidos"></div>'
@@ -1192,7 +1231,7 @@
     +     '<div class="field"><label>Duración del contrato (texto)</label><input id="cfg-duracion" value="' + escapeHtml(cfg.duracionContrato) + '"></div>'
     +   '</div>'
     +   '<div class="field"><label>Duración del contrato (meses, para calcular vencimientos)</label><input id="cfg-duracion-meses" type="number" min="1" value="' + (Number(cfg.duracionContratoMeses)||12) + '" style="max-width:140px">'
-    +     '<div class="hint">Se usa para calcular la fecha de vencimiento de cada contrato y avisarte en el Panel cuando falten 60 días o menos.</div>'
+    +     '<div class="hint">Se usa para calcular la fecha de vencimiento de cada contrato y avisarte cuando falten 60 días o menos.</div>'
     +   '</div>'
     + '</div></div>'
     + '<div class="card"><div class="card-head"><h3>Generar contrato por especialista</h3></div><div class="card-body">'
@@ -1211,6 +1250,51 @@
                 ? '<span class="tag off">Falta cédula/domicilio — edítalo en Editar</span>'
                 : '<button class="btn small" data-contrato="' + a.id + '">Generar contrato</button>')
           + '</td>'
+          + '</tr>';
+        }).join('')
+      + '</tbody></table>')
+    + '</div></div>';
+  }
+
+  function renderContratosTiempo(subnav, roomName){
+    var lista = state.alquileres.slice().sort(function(a,b){
+      if (a.activo === b.activo) return (a.especialista.nombre||'').localeCompare(b.especialista.nombre||'');
+      return a.activo === false ? 1 : -1;
+    });
+    var porVencer = computeContratosPorVencer();
+
+    return ''
+    + '<div class="view-head"><div><h2>Tiempo de contrato</h2><p>Cuánto tiempo lleva cada especialista con nosotros, y cuáles contratos están por vencer.</p></div></div>'
+    + subnav
+    + (porVencer.length === 0 ? '' :
+        '<div class="card" style="margin-bottom:1.4rem"><div class="card-head"><h3>Contratos por vencer o vencidos</h3></div><div class="card-body">'
+        + '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>'
+        + porVencer.map(function(x){
+            var estado = x.dias < 0
+              ? '<span class="tag completo">Vencido hace ' + Math.abs(x.dias) + ' día(s)</span>'
+              : (x.dias <= 30 ? '<span class="tag completo">En ' + x.dias + ' día(s)</span>' : '<span class="tag deposito">En ' + x.dias + ' día(s)</span>');
+            return '<tr><td>' + escapeHtml(x.a.especialista.nombre) + '</td><td>' + escapeHtml(roomName(x.a.consultorioId)) + '</td>'
+              + '<td class="mono">' + fechaLargaFromDate(x.venc) + '</td><td>' + estado + '</td>'
+              + '<td><button class="btn small" data-renovar="' + x.a.id + '">Renovar contrato</button></td></tr>';
+          }).join('')
+        + '</tbody></table>'
+        + '</div></div>')
+    + '<div class="card"><div class="card-head"><h3>Todos los especialistas</h3></div><div class="card-body">'
+    + (lista.length === 0 ? '<p class="empty-note">Aún no hay alquileres registrados.</p>' :
+      '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Fecha de inicio</th><th>Tiempo con nosotros</th><th>Vence contrato</th><th>Estado</th><th></th></tr></thead><tbody>'
+      + lista.map(function(a){
+          var t = tiempoConNosotros(a);
+          var venc = fechaVencimientoContrato(a);
+          var dias = diasParaVencerContrato(a);
+          var vencHtml = venc ? fechaLargaFromDate(venc) + (a.activo !== false && dias !== null && dias <= 60 ? (dias<0 ? ' (vencido)' : ' (' + dias + ' días)') : '') : '—';
+          return '<tr>'
+          + '<td>' + escapeHtml(a.especialista.nombre) + '</td>'
+          + '<td>' + escapeHtml(roomName(a.consultorioId)) + '</td>'
+          + '<td class="mono">' + fechaLarga(a.fechaInicio) + '</td>'
+          + '<td>' + tiempoTexto(t) + '</td>'
+          + '<td class="mono">' + vencHtml + '</td>'
+          + '<td>' + (a.activo === false ? '<span style="color:var(--ink-soft)">Finalizado</span>' : '<span style="color:var(--moss)">Activo</span>') + '</td>'
+          + '<td>' + (a.activo === false ? '' : '<button class="btn ghost small" data-renovar="' + a.id + '">Renovar contrato</button>') + '</td>'
           + '</tr>';
         }).join('')
       + '</tbody></table>')
@@ -1389,13 +1473,58 @@
   function openContratoWindow(rentalId){
     var a = state.alquileres.find(function(x){return x.id===rentalId;});
     if (!a) return;
-    var c = state.consultorios.find(function(x){ return String(x.id)===String(a.consultorioId); });
+    openContratoWindowFor(a);
+  }
+  function openContratoWindowFor(rental){
+    var c = state.consultorios.find(function(x){ return String(x.id)===String(rental.consultorioId); });
     if (!c){ toast('No se encontró el consultorio de este alquiler.'); return; }
     var w = window.open('', '_blank');
     if (!w){ toast('El navegador bloqueó la ventana. Permite ventanas emergentes para este sitio.'); return; }
     w.document.open();
-    w.document.write(buildContratoHtml(a, c));
+    w.document.write(buildContratoHtml(rental, c));
     w.document.close();
+  }
+
+  function openRenovarContratoModal(rentalId){
+    var a = state.alquileres.find(function(x){return x.id===rentalId;});
+    if (!a) return;
+    var venc = fechaVencimientoContrato(a);
+    var st = { fecha: new Date().toISOString().slice(0,10), precio: String(a.precioMensual||''), error:'' };
+    function draw(){
+      var root = document.getElementById('modal-root');
+      root.innerHTML = ''
+        + '<div class="overlay" id="modal-overlay"><div class="modal">'
+        +   '<div class="modal-head"><h3>Renovar contrato — ' + escapeHtml(a.especialista.nombre) + '</h3><button id="modal-close">✕</button></div>'
+        +   '<div class="modal-body">'
+        +     (st.error ? '<div class="error-msg">' + escapeHtml(st.error) + '</div>' : '')
+        +     '<p style="margin:0;color:var(--ink-soft);font-size:.85rem">Contrato actual vence el <strong>' + (venc ? fechaLargaFromDate(venc) : '—') + '</strong>. Al renovar, la fecha de inicio se actualiza y se genera un nuevo contrato listo para firmar.</p>'
+        +     '<div class="row2">'
+        +       '<div class="field"><label>Nueva fecha de inicio del contrato</label><input id="ren-fecha" type="date" value="' + st.fecha + '"></div>'
+        +       '<div class="field"><label>Precio mensual</label><input id="ren-precio" type="number" min="0" value="' + escapeHtml(st.precio) + '">'
+        +         '<div class="hint">Deja el mismo monto si no cambia, o ajústalo si vas a subir/bajar el precio en la renovación.</div>'
+        +       '</div>'
+        +     '</div>'
+        +   '</div>'
+        +   '<div class="modal-foot"><div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button><button class="btn" id="btn-confirmar-renovar">Renovar y generar contrato</button></div></div>'
+        + '</div></div>';
+      document.getElementById('modal-close').onclick = closeModal;
+      document.getElementById('modal-cancel').onclick = closeModal;
+      document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+      document.getElementById('ren-fecha').oninput = function(e){ st.fecha = e.target.value; };
+      document.getElementById('ren-precio').oninput = function(e){ st.precio = e.target.value; };
+      document.getElementById('btn-confirmar-renovar').onclick = function(){
+        if (!st.fecha){ st.error = 'Indica la nueva fecha de inicio.'; draw(); return; }
+        if (!st.precio || Number(st.precio) <= 0){ st.error = 'Indica un precio mensual válido.'; draw(); return; }
+        var nuevoPrecio = Number(st.precio);
+        db.collection('alquileres').doc(a.id).update({ fechaInicio: st.fecha, precioMensual: nuevoPrecio }).then(function(){
+          toast('Contrato renovado.');
+          closeModal();
+          var actualizado = Object.assign({}, a, { fechaInicio: st.fecha, precioMensual: nuevoPrecio });
+          openContratoWindowFor(actualizado);
+        }).catch(function(err){ console.error(err); st.error = 'No se pudo renovar. Intenta de nuevo.'; draw(); });
+      };
+    }
+    draw();
   }
 
 
@@ -1531,6 +1660,12 @@
     main.querySelectorAll('[data-contrato]').forEach(function(b){ b.onclick = function(){ openContratoWindow(b.dataset.contrato); }; });
     var btnEditContratoTpl = document.getElementById('btn-edit-contrato-tpl');
     if (btnEditContratoTpl) btnEditContratoTpl.onclick = function(){ openContratoTemplateModal(); };
+    main.querySelectorAll('[data-contratos-sub]').forEach(function(b){
+      b.onclick = function(){ state.contratosSub = b.dataset.contratosSub; render(); };
+    });
+    main.querySelectorAll('[data-renovar]').forEach(function(b){
+      b.onclick = function(){ openRenovarContratoModal(b.dataset.renovar); };
+    });
 
     main.querySelectorAll('[data-aprobar-solicitud]').forEach(function(b){
       b.onclick = function(){
@@ -2141,6 +2276,7 @@
         op = db.collection('alquileres').doc(modalState.editId).update(payload);
       } else {
         payload.creadoEn = new Date().toISOString();
+        payload.fechaInicioContrato = modalState.fecha;
         op = db.collection('alquileres').add(payload);
       }
       op.then(function(){

@@ -220,7 +220,7 @@
       <button data-view="rentabilidad"><span class="num">07</span>Rentabilidad</button>
       <button data-view="contratos"><span class="num">08</span>Contratos</button>
     </nav>
-    <div class="sidebar-foot">Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.04</span></div>
+    <div class="sidebar-foot">Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.06</span></div>
   </aside>
 
   <main class="main" id="main">
@@ -247,7 +247,7 @@
     consultorios: [],
     alquileres: [],
     pagos: {},
-    config: { telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'', mensajeAmigable:'', diasGraciaRecordatorio:3,
+    config: { telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'', mensajeAmigable:'', diasGraciaRecordatorio:3, contratoTemplate:'',
       nombreArrendador:'', nacionalidadArrendador:'', cedulaArrendador:'', domicilioArrendador:'',
       descripcionInmueble:'', serviciosIncluidos:'', ciudadFirma:'Santo Domingo de Guzmán, Distrito Nacional', duracionContrato:'un (1) año calendario' },
     loaded: { consultorios:false, alquileres:false, pagos:false, config:false },
@@ -350,7 +350,7 @@
     return { totalPeriodos: periods.length, pendientes: pendientes, mesesPendientes: pendientes.length, monto: pendientes.length * (Number(rental.precioMensual)||0) };
   }
   var DEFAULT_MENSAJE_RECORDATORIO = 'Hola {nombre}, le recordamos que tiene {meses} mes(es) de alquiler pendiente(s) por un total de {monto}, correspondiente a su consultorio ({consultorio}). Le agradecemos regularizar el pago a la mayor brevedad. ¡Gracias!';
-  var DEFAULT_MENSAJE_AMIGABLE = '¡Hola {nombre}! 😊 Solo un recordatorio amigable de que el pago de tu alquiler de este mes ({monto}, {consultorio}) sigue pendiente. Si ya lo hiciste, ¡mil gracias, ignora este mensaje! Cualquier cosa que necesites, aquí estamos. ¡Que tengas un excelente día!';
+  var DEFAULT_MENSAJE_AMIGABLE = '\u00a1Hola {nombre}! \u263a Solo un recordatorio amigable de que el pago de tu alquiler de este mes ({monto}, {consultorio}) sigue pendiente. Si ya lo hiciste, \u00a1mil gracias, ignora este mensaje! Cualquier cosa que necesites, aqu\u00ed estamos. \u00a1Que tengas un excelente d\u00eda!';
   function mensajeRecordatorioTemplate(){ return state.config.mensajeRecordatorio || DEFAULT_MENSAJE_RECORDATORIO; }
   function mensajeAmigableTemplate(){ return state.config.mensajeAmigable || DEFAULT_MENSAJE_AMIGABLE; }
   function diasGracia(){ return Number(state.config.diasGraciaRecordatorio) || 3; }
@@ -482,7 +482,7 @@
     }, function(err){ console.error(err); });
 
     db.doc('config/centro').onSnapshot(function(snap){
-      if (snap.exists) state.config = Object.assign({telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'', mensajeAmigable:'', diasGraciaRecordatorio:3,
+      if (snap.exists) state.config = Object.assign({telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'', mensajeAmigable:'', diasGraciaRecordatorio:3, contratoTemplate:'',
         nombreArrendador:'', nacionalidadArrendador:'', cedulaArrendador:'', domicilioArrendador:'',
         descripcionInmueble:'', serviciosIncluidos:'', ciudadFirma:'Santo Domingo de Guzmán, Distrito Nacional', duracionContrato:'un (1) año calendario'
       }, snap.data());
@@ -858,7 +858,7 @@
     +   heroCell('Monto adeudado (total)', money(montoMorosidad), 'activos e históricos', doctoresEnMora>0?'brick':'moss')
     + '</div>'
     + '<div class="card"><div class="card-body">'
-    + (conDeuda.length === 0 ? '<p class="empty-note">Ningún especialista tiene pagos pendientes. 🎉</p>' :
+    + (conDeuda.length === 0 ? '<p class="empty-note">Ning\u00fan especialista tiene pagos pendientes. \ud83c\udf89</p>' :
       '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Estado alquiler</th><th>Meses pendientes</th><th>Monto adeudado</th><th></th></tr></thead><tbody>'
       + conDeuda.map(function(x){
           var a = x.a, d = x.debt;
@@ -1053,6 +1053,7 @@
     +   '</div>'
     + '</div></div>'
     + '<div class="card"><div class="card-head"><h3>Generar contrato por especialista</h3></div><div class="card-body">'
+    +   '<p style="margin:0 0 .8rem"><button class="btn ghost small" id="btn-edit-contrato-tpl">Editar contrato base (párrafos y cláusulas)</button></p>'
     + (rows.length === 0 ? '<p class="empty-note">Aún no hay alquileres registrados.</p>' :
       '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Modalidad</th><th>Estado</th><th></th></tr></thead><tbody>'
       + rows.map(function(a){
@@ -1072,6 +1073,29 @@
       + '</tbody></table>')
     + '</div></div>';
   }
+
+  var DEFAULT_CONTRATO_TEMPLATE = ''
+    + '<p class="center"><strong>CONTRATO DE ARRENDAMIENTO DE INMUEBLE</strong></p>'
+    + '<p class="center underline"><strong>DECLARACIONES.</strong></p>'
+    + '<p><strong>ENTRE</strong>: De una parte, <strong>{ARRENDADOR_NOMBRE}</strong>, {ARRENDADOR_NACIONALIDAD}, Residente de República Dominicana bajo la Cédula número {ARRENDADOR_CEDULA}, domiciliada en {ARRENDADOR_DOMICILIO}; quien en lo que sigue de este contrato se denominará <strong>"LA ARRENDADORA"</strong>, o por su propio nombre;</p>'
+    + '<p>De otra parte, <strong>{ARRENDATARIO_NOMBRE}</strong>, {ARRENDATARIO_NACIONALIDAD}, de <strong>CÉDULA</strong> número <strong>{ARRENDATARIO_CEDULA}</strong>, domiciliada en <strong>{ARRENDATARIO_DOMICILIO}</strong>; quien en lo que sigue del presente contrato se denominará <strong>"LA ARRENDATARIA"</strong> o por su propio nombre.</p>'
+    + '<p><strong>LA ARRENDADORA</strong> y <strong>LA ARRENDATARIA</strong>, en lo adelante de este contrato, serán referidas conjuntamente como <strong>Las Partes</strong>.</p>'
+    + '<p class="center underline"><strong>PREÁMBULO.</strong></p>'
+    + '<p><span class="underline"><strong>POR CUANTO:</strong></span> <strong>LA ARRENDADORA</strong> es inquilina de un inmueble, descrito a continuación (en lo adelante <strong>"EL INMUEBLE"</strong>): "{INMUEBLE}"</p>'
+    + '<p><span class="underline"><strong>POR CUANTO:</strong></span> A que <strong>LA ARRENDATARIA</strong> tiene la intención de {MODALIDAD_TEXTO}.</p>'
+    + '<p><span class="underline"><strong>POR CUANTO:</strong></span> A que <strong>LAS PARTES</strong> están interesadas en suscribir el presente contrato de arrendamiento del referido consultorio, de conformidad a los términos y condiciones que se especifican más adelante en el presente contrato.</p>'
+    + '<p class="center underline"><strong>HAN CONVENIDO Y PACTADO LO SIGUIENTE</strong></p>'
+    + '<p><strong>LA ARRENDATARIA</strong> se compromete a pagar de forma mensual por concepto de alquiler o fracción de mes por adelantado, la suma de <strong>{PRECIO_LETRAS}</strong> (RD${PRECIO_NUMERO}). Este monto incluye los servicios de {SERVICIOS}. <strong>LAS PARTES</strong> acuerdan que el pago de la referida cuota mensual de alquiler iniciará el día {FECHA_INICIO}.</p>'
+    + '<p>{DEPOSITO_PARRAFO} Por tanto, <strong>LA ARRENDATARIA</strong> reconoce y acepta que deberá continuar con su obligación de pago del precio de alquiler, el día {DIA_PAGO_TEXTO} de cada mes.</p>'
+    + '<p><strong>LA ARRENDATARIA</strong> será el único responsable por cualquier daño ocasionado a <strong>EL CONSULTORIO</strong> durante el tiempo de vigencia del Contrato de Alquiler durante su turno. De igual forma, <strong>LA ARRENDATARIA</strong> será responsable por la pérdida sufrida sobre los objetos que permanezcan dentro del inmueble alquilado, como consecuencia de robo, incendio e inundaciones, siempre que dichas inundaciones no sean imputadas a <strong>LA ARRENDADORA</strong> propiamente.</p>'
+    + '<p><strong>LA ARRENDADORA</strong> y <strong>LA ARRENDATARIA</strong> se liberan mutuamente de toda responsabilidad de cualquier daño o pérdida sufrida sobre los objetos que permanezcan dentro del CONSULTORIO alquilado, como consecuencia de terremoto, guerra civil, cataclismo, y motines.</p>'
+    + '<p><strong>LAS PARTES</strong> reconocen y aceptan que el Contrato de Alquiler tendrá una duración de {DURACION}, a partir del {FECHA_INICIO}.</p>'
+    + '<p><strong>Firmado al {FECHA_FIRMA}</strong>, en la ciudad de {CIUDAD_FIRMA}.</p>'
+    + '<table class="firmas"><tr>'
+    +   '<td><div class="linea"></div><strong>{ARRENDADOR_NOMBRE}</strong><br>LA ARRENDADORA</td>'
+    +   '<td><div class="linea"></div><strong>{ARRENDATARIO_NOMBRE}</strong><br>LA ARRENDATARIA</td>'
+    + '</tr></table>';
+  function contratoTemplateActual(){ return state.config.contratoTemplate || DEFAULT_CONTRATO_TEMPLATE; }
 
   function buildContratoHtml(rental, consultorio){
     var cfg = state.config;
@@ -1096,27 +1120,28 @@
     var cedArr = cfg.cedulaArrendador || '___-_______-_';
     var domArr = cfg.domicilioArrendador || '____________________________';
 
-    var body = ''
-    + '<p class="center"><strong>CONTRATO DE ARRENDAMIENTO DE INMUEBLE</strong></p>'
-    + '<p class="center underline"><strong>DECLARACIONES.</strong></p>'
-    + '<p><strong>ENTRE</strong>: De una parte, <strong>' + escapeHtml(nombreArr) + '</strong>, ' + escapeHtml(nacArr) + ', Residente de República Dominicana bajo la Cédula número ' + escapeHtml(cedArr) + ', domiciliada en ' + escapeHtml(domArr) + '; quien en lo que sigue de este contrato se denominará <strong>"LA ARRENDADORA"</strong>, o por su propio nombre;</p>'
-    + '<p>De otra parte, <strong>' + escapeHtml(esp.nombre.toUpperCase()) + '</strong>, ' + escapeHtml((esp.nacionalidad||'____________').toUpperCase()) + ', de <strong>CÉDULA</strong> número <strong>' + escapeHtml(esp.cedula||'___-_______-_') + '</strong>, domiciliada en <strong>' + escapeHtml(esp.domicilio||'____________________________') + '</strong>; quien en lo que sigue del presente contrato se denominará <strong>"LA ARRENDATARIA"</strong> o por su propio nombre.</p>'
-    + '<p><strong>LA ARRENDADORA</strong> y <strong>LA ARRENDATARIA</strong>, en lo adelante de este contrato, serán referidas conjuntamente como <strong>Las Partes</strong>.</p>'
-    + '<p class="center underline"><strong>PREÁMBULO.</strong></p>'
-    + '<p><span class="underline"><strong>POR CUANTO:</strong></span> <strong>LA ARRENDADORA</strong> es inquilina de un inmueble, descrito a continuación (en lo adelante <strong>"EL INMUEBLE"</strong>): "' + escapeHtml(inmueble) + '"</p>'
-    + '<p><span class="underline"><strong>POR CUANTO:</strong></span> A que <strong>LA ARRENDATARIA</strong> tiene la intención de ' + modalidadTexto + '.</p>'
-    + '<p><span class="underline"><strong>POR CUANTO:</strong></span> A que <strong>LAS PARTES</strong> están interesadas en suscribir el presente contrato de arrendamiento del referido consultorio, de conformidad a los términos y condiciones que se especifican más adelante en el presente contrato.</p>'
-    + '<p class="center underline"><strong>HAN CONVENIDO Y PACTADO LO SIGUIENTE</strong></p>'
-    + '<p><strong>LA ARRENDATARIA</strong> se compromete a pagar de forma mensual por concepto de alquiler o fracción de mes por adelantado, la suma de <strong>' + montoEnLetras(rental.precioMensual) + '</strong> (RD$' + money(rental.precioMensual).replace('RD$ ','') + '). Este monto incluye los servicios de ' + escapeHtml(servicios) + '. <strong>LAS PARTES</strong> acuerdan que el pago de la referida cuota mensual de alquiler iniciará el día ' + fechaLarga(rental.fechaInicio) + '.</p>'
-    + '<p>' + depositoParrafo + ' Por tanto, <strong>LA ARRENDATARIA</strong> reconoce y acepta que deberá continuar con su obligación de pago del precio de alquiler, el día ' + diaPagoTexto(rental.diaPago) + ' de cada mes.</p>'
-    + '<p><strong>LA ARRENDATARIA</strong> será el único responsable por cualquier daño ocasionado a <strong>EL CONSULTORIO</strong> durante el tiempo de vigencia del Contrato de Alquiler durante su turno. De igual forma, <strong>LA ARRENDATARIA</strong> será responsable por la pérdida sufrida sobre los objetos que permanezcan dentro del inmueble alquilado, como consecuencia de robo, incendio e inundaciones, siempre que dichas inundaciones no sean imputadas a <strong>LA ARRENDADORA</strong> propiamente.</p>'
-    + '<p><strong>LA ARRENDADORA</strong> y <strong>LA ARRENDATARIA</strong> se liberan mutuamente de toda responsabilidad de cualquier daño o pérdida sufrida sobre los objetos que permanezcan dentro del CONSULTORIO alquilado, como consecuencia de terremoto, guerra civil, cataclismo, y motines.</p>'
-    + '<p><strong>LAS PARTES</strong> reconocen y aceptan que el Contrato de Alquiler tendrá una duración de ' + escapeHtml(duracion) + ', a partir del ' + fechaLarga(rental.fechaInicio) + '.</p>'
-    + '<p><strong>Firmado al ' + fechaLarga(rental.fechaInicio) + '</strong>, en la ciudad de ' + escapeHtml(ciudad) + '.</p>'
-    + '<table class="firmas"><tr>'
-    +   '<td><div class="linea"></div><strong>' + escapeHtml(nombreArr) + '</strong><br>LA ARRENDADORA</td>'
-    +   '<td><div class="linea"></div><strong>' + escapeHtml(esp.nombre.toUpperCase()) + '</strong><br>LA ARRENDATARIA</td>'
-    + '</tr></table>';
+    var vars = {
+      ARRENDADOR_NOMBRE: escapeHtml(nombreArr),
+      ARRENDADOR_NACIONALIDAD: escapeHtml(nacArr),
+      ARRENDADOR_CEDULA: escapeHtml(cedArr),
+      ARRENDADOR_DOMICILIO: escapeHtml(domArr),
+      ARRENDATARIO_NOMBRE: escapeHtml(esp.nombre.toUpperCase()),
+      ARRENDATARIO_NACIONALIDAD: escapeHtml((esp.nacionalidad||'____________').toUpperCase()),
+      ARRENDATARIO_CEDULA: escapeHtml(esp.cedula||'___-_______-_'),
+      ARRENDATARIO_DOMICILIO: escapeHtml(esp.domicilio||'____________________________'),
+      INMUEBLE: escapeHtml(inmueble),
+      MODALIDAD_TEXTO: modalidadTexto,
+      PRECIO_LETRAS: montoEnLetras(rental.precioMensual),
+      PRECIO_NUMERO: money(rental.precioMensual).replace('RD$ ',''),
+      SERVICIOS: escapeHtml(servicios),
+      FECHA_INICIO: fechaLarga(rental.fechaInicio),
+      DEPOSITO_PARRAFO: depositoParrafo,
+      DIA_PAGO_TEXTO: diaPagoTexto(rental.diaPago),
+      DURACION: escapeHtml(duracion),
+      FECHA_FIRMA: fechaLarga(rental.fechaInicio),
+      CIUDAD_FIRMA: escapeHtml(ciudad)
+    };
+    var body = fillTemplate(contratoTemplateActual(), vars);
 
     return '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">'
       + '<title>Contrato — ' + escapeHtml(esp.nombre) + '</title>'
@@ -1136,6 +1161,43 @@
       + '<div class="toolbar-print"><button onclick="window.print()">Imprimir / Guardar como PDF</button></div>'
       + body
       + '</body></html>';
+  }
+
+  function openContratoTemplateModal(){
+    var root = document.getElementById('modal-root');
+    var current = contratoTemplateActual();
+    root.innerHTML = ''
+      + '<div class="overlay" id="modal-overlay"><div class="modal" style="max-width:720px">'
+      +   '<div class="modal-head"><h3>Editar contrato base</h3><button id="modal-close">✕</button></div>'
+      +   '<div class="modal-body">'
+      +     '<div class="field"><label>Plantilla del contrato (HTML)</label>'
+      +       '<textarea id="f-contrato-tpl" rows="18" style="width:100%;padding:.55rem .6rem;border:1px solid var(--line);border-radius:4px;background:var(--paper);color:var(--ink);font-size:.82rem;font-family:\'IBM Plex Mono\',monospace;line-height:1.5">' + escapeHtml(current) + '</textarea>'
+      +       '<div class="hint">Cada párrafo o cláusula va envuelto en &lt;p&gt;...&lt;/p&gt;. Para agregar una nueva cláusula, copia una línea existente y escribe tu texto dentro de las etiquetas &lt;p&gt;&lt;/p&gt;. Usa &lt;strong&gt;texto&lt;/strong&gt; para negrita.</div>'
+      +       '<div class="hint">Marcadores disponibles (se reemplazan automáticamente por los datos de cada contrato): {ARRENDADOR_NOMBRE}, {ARRENDADOR_NACIONALIDAD}, {ARRENDADOR_CEDULA}, {ARRENDADOR_DOMICILIO}, {ARRENDATARIO_NOMBRE}, {ARRENDATARIO_NACIONALIDAD}, {ARRENDATARIO_CEDULA}, {ARRENDATARIO_DOMICILIO}, {INMUEBLE}, {MODALIDAD_TEXTO}, {PRECIO_LETRAS}, {PRECIO_NUMERO}, {SERVICIOS}, {FECHA_INICIO}, {DEPOSITO_PARRAFO}, {DIA_PAGO_TEXTO}, {DURACION}, {FECHA_FIRMA}, {CIUDAD_FIRMA}.</div>'
+      +     '</div>'
+      +   '</div>'
+      +   '<div class="modal-foot"><button class="btn ghost" id="btn-restore-contrato">Restaurar predeterminado</button><div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button><button class="btn" id="btn-save-contrato">Guardar</button><button class="btn ghost" id="btn-preview-contrato">Vista previa</button></div></div>'
+      + '</div></div>';
+    document.getElementById('modal-close').onclick = closeModal;
+    document.getElementById('modal-cancel').onclick = closeModal;
+    document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+    document.getElementById('btn-restore-contrato').onclick = function(){ document.getElementById('f-contrato-tpl').value = DEFAULT_CONTRATO_TEMPLATE; };
+    document.getElementById('btn-preview-contrato').onclick = function(){
+      var val = document.getElementById('f-contrato-tpl').value;
+      var demoRental = { especialista:{nombre:'NOMBRE DE EJEMPLO', nacionalidad:'Dominicana', cedula:'000-0000000-0', domicilio:'Dirección de ejemplo'}, modalidad:'completo', precioMensual: 25000, fechaInicio: new Date().toISOString().slice(0,10), diaPago:'15', deposito:{dado:true, monto:25000} };
+      var demoRoom = { pisoNumero:1, piso:1, equipamiento:'' };
+      var prevCfg = state.config.contratoTemplate;
+      state.config.contratoTemplate = val;
+      var w = window.open('', '_blank');
+      if (w){ w.document.open(); w.document.write(buildContratoHtml(demoRental, demoRoom)); w.document.close(); }
+      state.config.contratoTemplate = prevCfg;
+    };
+    document.getElementById('btn-save-contrato').onclick = function(){
+      var val = document.getElementById('f-contrato-tpl').value;
+      db.doc('config/centro').set(Object.assign({}, state.config, { contratoTemplate: val })).then(function(){
+        toast('Contrato base actualizado.'); closeModal();
+      }).catch(function(err){ console.error(err); toast('No se pudo guardar. Intenta de nuevo.'); });
+    };
   }
 
   function openContratoWindow(rentalId){
@@ -1258,6 +1320,8 @@
       };
     });
     main.querySelectorAll('[data-contrato]').forEach(function(b){ b.onclick = function(){ openContratoWindow(b.dataset.contrato); }; });
+    var btnEditContratoTpl = document.getElementById('btn-edit-contrato-tpl');
+    if (btnEditContratoTpl) btnEditContratoTpl.onclick = function(){ openContratoTemplateModal(); };
 
     var btnDl = document.getElementById('btn-download-share');
     if (btnDl) btnDl.onclick = function(){

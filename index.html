@@ -219,7 +219,7 @@
       <button data-view="compartir"><span class="num">06</span>Compartir con doctores</button>
       <button data-view="rentabilidad"><span class="num">07</span>Rentabilidad</button>
     </nav>
-    <div class="sidebar-foot">Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.01</span></div>
+    <div class="sidebar-foot">Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.02</span></div>
   </aside>
 
   <main class="main" id="main">
@@ -246,7 +246,7 @@
     consultorios: [],
     alquileres: [],
     pagos: {},
-    config: { telefonoContacto:'', emailContacto:'' },
+    config: { telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'' },
     loaded: { consultorios:false, alquileres:false, pagos:false, config:false },
     search: '',
   };
@@ -299,6 +299,30 @@
     var periods = billingPeriods(rental);
     var pendientes = periods.filter(function(p){ var pg = state.pagos[rental.id+'__'+p.key]; return !(pg && pg.pagado); });
     return { totalPeriodos: periods.length, pendientes: pendientes, mesesPendientes: pendientes.length, monto: pendientes.length * (Number(rental.precioMensual)||0) };
+  }
+  var DEFAULT_MENSAJE_RECORDATORIO = 'Hola {nombre}, le recordamos que tiene {meses} mes(es) de alquiler pendiente(s) por un total de {monto}, correspondiente a su consultorio ({consultorio}). Le agradecemos regularizar el pago a la mayor brevedad. ¡Gracias!';
+  function mensajeRecordatorioTemplate(){ return state.config.mensajeRecordatorio || DEFAULT_MENSAJE_RECORDATORIO; }
+  function fillTemplate(tpl, vars){
+    return tpl.replace(/\{(\w+)\}/g, function(m, key){ return (key in vars) ? vars[key] : m; });
+  }
+  // WhatsApp needs digits only, with country code. DR numbers are commonly typed
+  // as 10 digits (809/829/849 + 7 digits) without the +1 country code, so we add it.
+  function normalizePhoneForWhatsApp(phone){
+    var digits = String(phone||'').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 10) return '1' + digits;
+    return digits;
+  }
+  function buildWhatsAppUrl(rental, debt, roomName){
+    var phone = normalizePhoneForWhatsApp(rental.especialista.telefono);
+    if (!phone) return null;
+    var msg = fillTemplate(mensajeRecordatorioTemplate(), {
+      nombre: rental.especialista.nombre,
+      meses: String(debt.mesesPendientes),
+      monto: money(debt.monto),
+      consultorio: roomName
+    });
+    return 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
   }
   function completoHabilitado(c){ return c.modalidadCompletoHabilitada !== false; }
   function diaHabilitado(c){ return c.modalidadDiaHabilitada !== false; }
@@ -384,7 +408,7 @@
     }, function(err){ console.error(err); });
 
     db.doc('config/centro').onSnapshot(function(snap){
-      if (snap.exists) state.config = Object.assign({telefonoContacto:'', emailContacto:''}, snap.data());
+      if (snap.exists) state.config = Object.assign({telefonoContacto:'', emailContacto:'', mensajeRecordatorio:''}, snap.data());
       state.loaded.config = true;
       render();
     }, function(err){ console.error(err); });
@@ -733,7 +757,8 @@
         }).join('')
       + '</tbody></table>')
     + '</div></div>'
-    + '<div class="view-head" style="margin-top:1.8rem"><div><h2 style="font-size:1.15rem">Morosidad — pagos pendientes acumulados</h2><p>Se calcula automáticamente para cada alquiler según su fecha de inicio y su día de pago: todo ciclo mensual ya vencido y no marcado como cobrado cuenta como deuda, mes tras mes.</p></div></div>'
+    + '<div class="view-head" style="margin-top:1.8rem"><div><h2 style="font-size:1.15rem">Morosidad — pagos pendientes acumulados</h2><p>Se calcula automáticamente para cada alquiler según su fecha de inicio y su día de pago: todo ciclo mensual ya vencido y no marcado como cobrado cuenta como deuda, mes tras mes.</p></div>'
+    +   '<button class="btn ghost small" id="btn-edit-mensaje">Editar mensaje de recordatorio</button></div>'
     + '<div class="hero-strip">'
     +   heroCell('Doctores en mora', String(doctoresEnMora), 'con al menos un mes sin pagar', doctoresEnMora>0?'brick':'moss')
     +   heroCell('Meses pendientes (total)', String(mesesPendientesTotal), 'sumando todos los alquileres', doctoresEnMora>0?'brick':'moss')
@@ -744,13 +769,17 @@
       '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Estado alquiler</th><th>Meses pendientes</th><th>Monto adeudado</th><th></th></tr></thead><tbody>'
       + conDeuda.map(function(x){
           var a = x.a, d = x.debt;
+          var room = roomName(a.consultorioId);
+          var waUrl = buildWhatsAppUrl(a, d, room);
           return '<tr>'
           + '<td>' + escapeHtml(a.especialista.nombre) + '</td>'
-          + '<td>' + escapeHtml(roomName(a.consultorioId)) + '</td>'
+          + '<td>' + escapeHtml(room) + '</td>'
           + '<td>' + (a.activo === false ? '<span style="color:var(--ink-soft)">Finalizado</span>' : '<span style="color:var(--moss)">Activo</span>') + '</td>'
           + '<td class="mono" style="color:var(--brick)">' + d.mesesPendientes + '</td>'
           + '<td class="mono" style="color:var(--brick)">' + money(d.monto) + '</td>'
-          + '<td><button class="btn ghost small" data-historial="' + a.id + '">Ver historial</button></td>'
+          + '<td><div class="actions-cell"><button class="btn ghost small" data-historial="' + a.id + '">Ver historial</button>'
+          + (waUrl ? '<button class="btn small" data-whatsapp-url="' + escapeHtml(waUrl) + '" style="background:#25D366;border-color:#25D366">Recordar por WhatsApp</button>' : '<span class="tag sindep">Sin teléfono</span>')
+          + '</div></td>'
           + '</tr>';
         }).join('')
       + '</tbody></table>')
@@ -988,6 +1017,9 @@
 
     main.querySelectorAll('[data-pago]').forEach(function(b){ b.onclick = function(){ togglePago(b.dataset.pago); }; });
     main.querySelectorAll('[data-historial]').forEach(function(b){ b.onclick = function(){ openHistorialPagosModal(b.dataset.historial); }; });
+    main.querySelectorAll('[data-whatsapp-url]').forEach(function(b){ b.onclick = function(){ window.open(b.dataset.whatsappUrl, '_blank'); }; });
+    var btnEditMsg = document.getElementById('btn-edit-mensaje');
+    if (btnEditMsg) btnEditMsg.onclick = function(){ openMensajeRecordatorioModal(); };
 
     var cfgTel = document.getElementById('cfg-telefono');
     var cfgEmail = document.getElementById('cfg-email');
@@ -1140,6 +1172,32 @@
       });
     }
     draw();
+  }
+
+  function openMensajeRecordatorioModal(){
+    var root = document.getElementById('modal-root');
+    var current = mensajeRecordatorioTemplate();
+    root.innerHTML = ''
+      + '<div class="overlay" id="modal-overlay"><div class="modal">'
+      +   '<div class="modal-head"><h3>Mensaje de recordatorio</h3><button id="modal-close">✕</button></div>'
+      +   '<div class="modal-body">'
+      +     '<div class="field"><label>Texto del mensaje</label>'
+      +       '<textarea id="f-mensaje" rows="6" style="width:100%;padding:.55rem .6rem;border:1px solid var(--line);border-radius:4px;background:var(--paper);color:var(--ink);font-size:.9rem;font-family:inherit">' + escapeHtml(current) + '</textarea>'
+      +       '<div class="hint">Variables disponibles: {nombre}, {meses}, {monto}, {consultorio}. Se reemplazan automáticamente por los datos de cada especialista al enviar.</div>'
+      +     '</div>'
+      +   '</div>'
+      +   '<div class="modal-foot"><button class="btn ghost" id="btn-restore-default">Restaurar predeterminado</button><div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button><button class="btn" id="modal-save-mensaje">Guardar</button></div></div>'
+      + '</div></div>';
+    document.getElementById('modal-close').onclick = closeModal;
+    document.getElementById('modal-cancel').onclick = closeModal;
+    document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+    document.getElementById('btn-restore-default').onclick = function(){ document.getElementById('f-mensaje').value = DEFAULT_MENSAJE_RECORDATORIO; };
+    document.getElementById('modal-save-mensaje').onclick = function(){
+      var val = document.getElementById('f-mensaje').value;
+      db.doc('config/centro').set(Object.assign({}, state.config, { mensajeRecordatorio: val })).then(function(){
+        toast('Mensaje de recordatorio actualizado.'); closeModal();
+      }).catch(function(err){ console.error(err); toast('No se pudo guardar. Intenta de nuevo.'); });
+    };
   }
 
   function openTarifaModal(roomId){

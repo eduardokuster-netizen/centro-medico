@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ledger de Consultorios</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+  :root {
+    --ink:#3A3448; --ink-soft:#726C82; --paper:#F3F1F7; --paper-raised:#FFFFFF;
+    --line:#E1DCEC; --gold:#8873B8; --gold-bg:#EDE7F7; --moss:#3F8F5F; --moss-bg:#DCF0E2;
+    --brick:#C4544A; --brick-bg:#F7DEDA; --white:#FFFFFF; --danger:#B03A2E; --plum:#6E5A93; --plum-bg:#EAE3F5;
+    box-sizing:border-box;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink:#EDEAF4; --ink-soft:#B9B2CC; --paper:#221E2C; --paper-raised:#2B2637;
+      --line:#3C3548; --gold:#B7A6DE; --gold-bg:#362F4A; --moss:#84C79A; --moss-bg:#1F3327;
+      --brick:#E0857B; --brick-bg:#402A28; --white:#1C1826; --danger:#E08375; --plum:#B7A6DE; --plum-bg:#332C46;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink:#EDEAF4; --ink-soft:#B9B2CC; --paper:#221E2C; --paper-raised:#2B2637;
+    --line:#3C3548; --gold:#B7A6DE; --gold-bg:#362F4A; --moss:#84C79A; --moss-bg:#1F3327;
+    --brick:#E0857B; --brick-bg:#402A28; --white:#1C1826; --danger:#E08375; --plum:#B7A6DE; --plum-bg:#332C46;
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  html { scroll-padding-top: env(safe-area-inset-top,0px); }
+  body {
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding-top: env(safe-area-inset-top,0px);
+    padding-bottom: env(safe-area-inset-bottom,0px);
+  }
+  .mono { font-family:'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric:tabular-nums; }
+  a { color:inherit; }
+  button { font-family:inherit; cursor:pointer; }
+  input, select { font-family:inherit; }
+
+  .app { display:flex; min-height:100vh; }
+
+  .sidebar {
+    width:236px; flex-shrink:0; background:#D6EAFB; color:#1E3A56;
+    position:fixed; top:0; left:0; bottom:0; display:flex; flex-direction:column;
+    padding: calc(1.5rem + env(safe-area-inset-top,0px)) 0 calc(1.25rem + env(safe-area-inset-bottom,0px));
+    border-right:1px solid #BEDCF5;
+  }
+  .brand { padding:0 1.4rem 1.4rem; border-bottom:1px solid rgba(30,58,86,0.14); margin-bottom:1rem; }
+  .brand .mark { font-size:0.72rem; letter-spacing:.04em; color:#3E668C; }
+  .brand h1 { font-size:1.18rem; margin:.25rem 0 0; font-weight:600; line-height:1.25; color:#1E3A56; }
+  nav { display:flex; flex-direction:column; gap:2px; padding:0 .7rem; overflow-y:auto; }
+  nav button {
+    all:unset; display:flex; align-items:center; gap:.6rem; padding:.62rem .7rem; border-radius:5px;
+    font-size:.92rem; color:#2C5478; cursor:pointer;
+  }
+  nav button .num { font-family:'IBM Plex Mono',monospace; font-size:.72rem; color:#5E85A8; width:1.1rem; flex-shrink:0; }
+  nav button:hover { background:rgba(30,58,86,0.08); color:#1E3A56; }
+  nav button.active { background:#FFFFFF; color:#1E3A56; font-weight:600; }
+  nav button.active .num { color:var(--gold); }
+  .sidebar-foot { margin-top:auto; padding:0 1.4rem; font-size:.74rem; color:#5E85A8; line-height:1.5; }
+
+  .main { margin-left:236px; flex:1; min-width:0; padding: calc(2.1rem + env(safe-area-inset-top,0px)) 2.4rem calc(3rem + env(safe-area-inset-bottom,0px)); }
+  .view-head { display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; margin-bottom:1.6rem; flex-wrap:wrap; }
+  .view-head h2 { font-size:1.5rem; margin:0 0 .2rem; font-weight:600; }
+  .view-head p { margin:0; color:var(--ink-soft); font-size:.92rem; max-width:56ch; }
+
+  .btn {
+    border:1px solid var(--ink); background:var(--ink); color:var(--paper);
+    padding:.58rem 1rem; border-radius:4px; font-size:.88rem; font-weight:600;
+  }
+  .btn:hover { opacity:.88; }
+  .btn.ghost { background:transparent; color:var(--ink); border-color:var(--line); font-weight:500; }
+  .btn.danger { background:var(--danger); border-color:var(--danger); color:#fff; }
+  .btn.small { padding:.36rem .7rem; font-size:.78rem; }
+  .btn-row { display:flex; gap:.6rem; flex-wrap:wrap; }
+  .mini-x { all:unset; cursor:pointer; font-size:.7rem; color:var(--ink-soft); text-decoration:underline; margin-left:.4rem; }
+  .mini-x.danger-x { color:var(--brick); }
+
+  .hero-strip { display:flex; border:1px solid var(--line); border-radius:6px; background:var(--paper-raised); overflow:hidden; margin-bottom:1.8rem; }
+  .hero-cell { flex:1; padding:1.1rem 1.3rem; border-right:1px solid var(--line); }
+  .hero-cell:last-child { border-right:none; }
+  .hero-cell .label { font-size:.76rem; color:var(--ink-soft); margin-bottom:.35rem; }
+  .hero-cell .value { font-family:'IBM Plex Mono',monospace; font-size:1.9rem; font-weight:600; line-height:1; }
+  .hero-cell .sub { font-size:.76rem; color:var(--ink-soft); margin-top:.35rem; }
+  .hero-cell.accent-gold .value { color:var(--gold); }
+  .hero-cell.accent-moss .value { color:var(--moss); }
+  .hero-cell.accent-brick .value { color:var(--brick); }
+  @media (max-width:900px){ .hero-strip{flex-wrap:wrap;} .hero-cell{flex:1 1 45%; border-bottom:1px solid var(--line);} }
+
+  .panel-cols { display:grid; grid-template-columns:1.3fr 1fr; gap:1.4rem; align-items:start; }
+  @media (max-width:980px){ .panel-cols{grid-template-columns:1fr;} }
+
+  .card { border:1px solid var(--line); border-radius:6px; background:var(--paper-raised); }
+  .card-head { display:flex; justify-content:space-between; align-items:center; padding:.9rem 1.1rem; border-bottom:1px solid var(--line); }
+  .card-head h3 { margin:0; font-size:.95rem; font-weight:600; }
+  .card-body { padding:.4rem 1.1rem .9rem; }
+  .chart-card { padding:1rem 1.1rem 1.3rem; }
+  .chart-card h3 { margin:0 0 .8rem; font-size:.92rem; font-weight:600; }
+  .chart-box { position:relative; height:280px; }
+  .chart-box.small { height:230px; }
+
+  table.list { width:100%; border-collapse:collapse; font-size:.85rem; }
+  table.list th { text-align:left; font-weight:600; font-size:.72rem; color:var(--ink-soft); padding:.5rem .3rem; border-bottom:1px solid var(--line); }
+  table.list td { padding:.55rem .3rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.list tr:last-child td { border-bottom:none; }
+  .tag { display:inline-block; padding:.14rem .5rem; border-radius:3px; font-size:.72rem; font-weight:600; white-space:nowrap; }
+  .tag.completo { background:var(--brick-bg); color:var(--brick); }
+  .tag.dia { background:var(--brick-bg); color:var(--brick); }
+  .tag.vacio { background:var(--moss-bg); color:var(--moss); }
+  .tag.deposito { background:var(--plum-bg); color:var(--plum); }
+  .tag.sindep { background:transparent; color:var(--ink-soft); border:1px solid var(--line); }
+  .tag.off { background:transparent; color:var(--ink-soft); border:1px solid var(--line); }
+  .actions-cell { display:flex; gap:.35rem; flex-wrap:wrap; }
+
+  .floor-head { font-size:.82rem; font-weight:600; color:var(--ink-soft); margin:1.3rem 0 .6rem; padding-top:.2rem; border-top:1px solid var(--line); }
+  .floor-head:first-child { margin-top:0; border-top:none; padding-top:0; }
+
+  .room-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:.65rem; }
+  .room-card { border:1px solid var(--line); border-radius:6px; background:var(--paper-raised); padding:.75rem .85rem; position:relative; }
+  .room-card .rn { font-family:'IBM Plex Mono',monospace; font-size:.72rem; color:var(--ink-soft); }
+  .room-card .rname { font-weight:600; font-size:.9rem; margin:.1rem 0 .3rem; cursor:pointer; }
+  .room-card .suggested { font-size:.72rem; color:var(--ink-soft); margin-bottom:.4rem; }
+  .room-card .rstatus { font-size:.78rem; line-height:1.6; cursor:default; }
+  .room-card .revenue { margin-top:.4rem; font-weight:700; color:var(--gold); font-family:'IBM Plex Mono',monospace; font-size:.82rem; }
+  .room-card.completo { background:var(--brick-bg); }
+  .room-card.vacio { background:var(--moss-bg); }
+  .room-card .edit-link { position:absolute; top:.6rem; right:.65rem; font-size:.68rem; color:var(--ink-soft); background:none; border:none; text-decoration:underline; padding:0; }
+
+  .matrix-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:6px; background:var(--paper-raised); }
+  table.matrix { border-collapse:collapse; width:100%; min-width:760px; font-size:.82rem; }
+  table.matrix th { font-family:'IBM Plex Mono',monospace; font-size:.72rem; color:var(--ink-soft); font-weight:600; text-align:center; padding:.55rem .4rem; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--paper-raised); }
+  table.matrix th.rn-h { text-align:left; }
+  table.matrix td { border-bottom:1px solid var(--line); border-right:1px solid var(--line); padding:.4rem; text-align:center; min-width:96px; }
+  table.matrix td.rn { font-family:'IBM Plex Mono',monospace; text-align:left; color:var(--ink-soft); white-space:nowrap; background:var(--paper-raised); position:sticky; left:0; }
+  table.matrix td.floorbreak { border-top:2px solid var(--ink-soft); }
+  table.matrix td.slot { cursor:pointer; }
+  table.matrix td.slot.ocupado { background:var(--brick-bg); color:var(--brick); font-weight:600; }
+  table.matrix td.slot.vacante { color:var(--moss); background:var(--moss-bg); opacity:.55; }
+  table.matrix td.slot.vacante:hover { opacity:1; }
+  table.matrix td.completo-cell { background:var(--brick-bg); color:var(--brick); font-weight:600; cursor:pointer; }
+
+  .overlay { position:fixed; inset:0; background:rgba(58,52,72,0.45); display:flex; align-items:flex-start; justify-content:center; padding:5vh 1rem calc(5vh + env(safe-area-inset-bottom,0px)); overflow-y:auto; z-index:50; }
+  .modal { background:var(--paper-raised); border:1px solid var(--line); border-radius:8px; width:100%; max-width:520px; }
+  .modal-head { display:flex; justify-content:space-between; align-items:center; padding:1rem 1.2rem; border-bottom:1px solid var(--line); }
+  .modal-head h3 { margin:0; font-size:1.02rem; }
+  .modal-head button { all:unset; cursor:pointer; color:var(--ink-soft); font-size:1.1rem; padding:.2rem; }
+  .modal-body { padding:1.1rem 1.2rem 1.3rem; display:flex; flex-direction:column; gap:.9rem; }
+  .field label { display:block; font-size:.78rem; color:var(--ink-soft); margin-bottom:.3rem; }
+  .field input, .field select { width:100%; padding:.55rem .6rem; border:1px solid var(--line); border-radius:4px; background:var(--paper); color:var(--ink); font-size:.9rem; }
+  .field input:focus, .field select:focus { outline:2px solid var(--gold); outline-offset:1px; }
+  .field .hint { font-size:.74rem; color:var(--ink-soft); margin-top:.3rem; }
+  .field.checkline { display:flex; align-items:center; gap:.5rem; }
+  .field.checkline input[type=checkbox] { width:auto; }
+  .field.checkline label { margin:0; font-size:.86rem; color:var(--ink); }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:.8rem; }
+  .radio-group { display:flex; gap:.6rem; }
+  .radio-opt { flex:1; border:1px solid var(--line); border-radius:5px; padding:.55rem .6rem; font-size:.85rem; cursor:pointer; text-align:center; }
+  .radio-opt.sel { border-color:var(--ink); background:var(--ink); color:var(--paper); font-weight:600; }
+  .radio-opt.blocked { opacity:.4; cursor:not-allowed; }
+  .day-check { display:flex; flex-wrap:wrap; gap:.4rem; }
+  .day-chip { border:1px solid var(--line); border-radius:4px; padding:.35rem .65rem; font-size:.8rem; cursor:pointer; }
+  .day-chip.sel { background:var(--gold); border-color:var(--gold); color:#fff; font-weight:600; }
+  .day-chip.blocked { opacity:.35; cursor:not-allowed; text-decoration:line-through; }
+  .modal-foot { display:flex; justify-content:space-between; gap:.6rem; padding:0 1.2rem 1.2rem; align-items:center; flex-wrap:wrap; }
+  .modal-foot .right { display:flex; gap:.6rem; margin-left:auto; }
+  .error-msg { background:var(--brick-bg); color:var(--brick); padding:.55rem .7rem; border-radius:4px; font-size:.82rem; }
+  .empty-note { color:var(--ink-soft); font-size:.86rem; padding:1rem .2rem; }
+
+  .toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.1rem; gap:1rem; flex-wrap:wrap; }
+  .search-input { padding:.5rem .7rem; border:1px solid var(--line); border-radius:4px; background:var(--paper-raised); min-width:220px; font-size:.86rem; color:var(--ink); }
+
+  .legend { display:flex; gap:1rem; font-size:.78rem; color:var(--ink-soft); margin-bottom:1rem; flex-wrap:wrap; }
+  .legend span { display:inline-flex; align-items:center; gap:.35rem; }
+  .swatch { width:.65rem; height:.65rem; border-radius:2px; display:inline-block; }
+
+  .toast { position:fixed; bottom: calc(1.4rem + env(safe-area-inset-bottom,0px)); left:50%; transform:translateX(-50%); background:var(--ink); color:var(--paper); padding:.6rem 1.1rem; border-radius:5px; font-size:.85rem; z-index:60; opacity:0; transition:opacity .2s; pointer-events:none; }
+  .toast.show { opacity:1; }
+
+  .offer-card { border:1px solid var(--line); border-radius:6px; background:var(--paper-raised); padding:1rem 1.15rem; margin-bottom:.7rem; }
+  .offer-card .oname { font-weight:600; margin-bottom:.4rem; display:flex; justify-content:space-between; gap:.5rem; }
+  .offer-card .om2 { font-weight:400; color:var(--ink-soft); font-size:.82rem; white-space:nowrap; }
+  .offer-line { display:flex; justify-content:space-between; font-size:.88rem; padding:.28rem 0; border-top:1px solid var(--line); }
+  .offer-line:first-of-type { border-top:none; }
+  .offer-price { font-family:'IBM Plex Mono',monospace; font-weight:600; color:var(--moss); }
+  .contact-card { border:1px solid var(--line); border-radius:6px; background:var(--paper-raised); padding:1rem 1.15rem; margin-bottom:1.4rem; }
+  .contact-card .row2 { margin-top:.5rem; }
+
+  @media (max-width:760px) {
+    .sidebar { position:static; width:100%; flex-direction:row; overflow-x:auto; padding: calc(.8rem + env(safe-area-inset-top,0px)) .6rem .8rem; }
+    .brand { display:none; }
+    nav { flex-direction:row; padding:0; }
+    nav button { white-space:nowrap; }
+    .sidebar-foot { display:none; }
+    .main { margin-left:0; padding:1.3rem 1rem 3rem; }
+    .app { flex-direction:column; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="mark">CENTRO MÉDICO · CONSULTORIOS EN ALQUILER</div>
+      <h1>Ledger de Consultorios</h1>
+    </div>
+    <nav id="nav">
+      <button data-view="panel" class="active"><span class="num">01</span>Panel</button>
+      <button data-view="consultorios"><span class="num">02</span>Consultorios</button>
+      <button data-view="especialistas"><span class="num">03</span>Especialistas</button>
+      <button data-view="matriz"><span class="num">04</span>Matriz semanal</button>
+      <button data-view="cobros"><span class="num">05</span>Cobros del mes</button>
+      <button data-view="compartir"><span class="num">06</span>Compartir con doctores</button>
+      <button data-view="rentabilidad"><span class="num">07</span>Rentabilidad</button>
+    </nav>
+    <div class="sidebar-foot">Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.02</span></div>
+  </aside>
+
+  <main class="main" id="main">
+    <div class="empty-note">Cargando…</div>
+  </main>
+</div>
+
+<div id="modal-root"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  var DIAS = [
+    {k:'lunes', short:'Lun'}, {k:'martes', short:'Mar'}, {k:'miercoles', short:'Mié'},
+    {k:'jueves', short:'Jue'}, {k:'viernes', short:'Vie'}, {k:'sabado', short:'Sáb'}
+  ];
+  var DIA_KEYS = DIAS.map(function(d){return d.k;});
+  var PISOS_INICIALES = [ {piso:1, count:11}, {piso:2, count:12}, {piso:3, count:13} ];
+
+  var state = {
+    view: 'panel',
+    consultorios: [],
+    alquileres: [],
+    pagos: {},
+    config: { telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'' },
+    loaded: { consultorios:false, alquileres:false, pagos:false, config:false },
+    search: '',
+  };
+  var charts = { ingresos:null, distribucion:null };
+
+  function monthKey(d){ d = d || new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
+  function monthLabel(d){ d = d || new Date(); return d.toLocaleDateString('es-DO', {month:'long', year:'numeric'}); }
+  function money(n){ n = Number(n)||0; return 'RD$ ' + n.toLocaleString('es-DO', {maximumFractionDigits:0}); }
+  function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function escapeHtml(s){
+    return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function toast(msg){
+    var t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(function(){ t.classList.remove('show'); }, 2400);
+  }
+  function dayLabel(k){ var d = DIAS.find(function(x){return x.k===k;}); return d ? d.short : k; }
+  function getDias(r){ return (r.dias && r.dias.length) ? r.dias : (r.dia ? [r.dia] : []); }
+  var MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  function periodLabel(key){
+    var parts = key.split('-'); var y = Number(parts[0]), m = Number(parts[1])-1;
+    return MESES_ES[m] + ' ' + y;
+  }
+  /** All monthly billing periods owed for a rental, from fechaInicio+diaPago through
+   * today (or its fechaFin if it was finalized) — only periods whose due date has
+   * already passed are included, so "today" never shows up as owed prematurely. */
+  function billingPeriods(rental){
+    if (!rental.fechaInicio) return [];
+    var start = new Date(rental.fechaInicio + 'T00:00:00');
+    if (isNaN(start.getTime())) return [];
+    var diaPago = Number(rental.diaPago) || 1;
+    var limit = rental.fechaFin ? new Date(rental.fechaFin + 'T00:00:00') : new Date();
+    var cy = start.getFullYear(), cm = start.getMonth();
+    if (start.getDate() > diaPago){ cm++; if (cm>11){cm=0; cy++;} }
+    var periods = [];
+    var guard = 0;
+    while (guard++ < 600){
+      var due = new Date(cy, cm, diaPago);
+      if (due > limit) break;
+      var key = cy + '-' + String(cm+1).padStart(2,'0');
+      periods.push({ key:key, due:due });
+      cm++; if (cm>11){cm=0; cy++;}
+    }
+    return periods;
+  }
+  function rentalDebt(rental){
+    var periods = billingPeriods(rental);
+    var pendientes = periods.filter(function(p){ var pg = state.pagos[rental.id+'__'+p.key]; return !(pg && pg.pagado); });
+    return { totalPeriodos: periods.length, pendientes: pendientes, mesesPendientes: pendientes.length, monto: pendientes.length * (Number(rental.precioMensual)||0) };
+  }
+  var DEFAULT_MENSAJE_RECORDATORIO = 'Hola {nombre}, le recordamos que tiene {meses} mes(es) de alquiler pendiente(s) por un total de {monto}, correspondiente a su consultorio ({consultorio}). Le agradecemos regularizar el pago a la mayor brevedad. ¡Gracias!';
+  function mensajeRecordatorioTemplate(){ return state.config.mensajeRecordatorio || DEFAULT_MENSAJE_RECORDATORIO; }
+  function fillTemplate(tpl, vars){
+    return tpl.replace(/\{(\w+)\}/g, function(m, key){ return (key in vars) ? vars[key] : m; });
+  }
+  // WhatsApp needs digits only, with country code. DR numbers are commonly typed
+  // as 10 digits (809/829/849 + 7 digits) without the +1 country code, so we add it.
+  function normalizePhoneForWhatsApp(phone){
+    var digits = String(phone||'').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 10) return '1' + digits;
+    return digits;
+  }
+  function buildWhatsAppUrl(rental, debt, roomName){
+    var phone = normalizePhoneForWhatsApp(rental.especialista.telefono);
+    if (!phone) return null;
+    var msg = fillTemplate(mensajeRecordatorioTemplate(), {
+      nombre: rental.especialista.nombre,
+      meses: String(debt.mesesPendientes),
+      monto: money(debt.monto),
+      consultorio: roomName
+    });
+    return 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
+  }
+  function completoHabilitado(c){ return c.modalidadCompletoHabilitada !== false; }
+  function diaHabilitado(c){ return c.modalidadDiaHabilitada !== false; }
+  function shorten(name){
+    if (!name) return '';
+    var parts = name.trim().split(/\s+/);
+    if (parts.length <= 2) return name;
+    return parts[0] + ' ' + parts[1].charAt(0) + '.';
+  }
+  function pisoNombreInicial(numero){
+    var acc = 0;
+    for (var i=0;i<PISOS_INICIALES.length;i++){
+      if (numero <= acc + PISOS_INICIALES[i].count) return {piso: PISOS_INICIALES[i].piso, pisoNumero: numero - acc};
+      acc += PISOS_INICIALES[i].count;
+    }
+    return {piso:1, pisoNumero:numero};
+  }
+  function pisosPresentes(){
+    var set = {};
+    state.consultorios.forEach(function(c){ set[c.piso||1] = true; });
+    var arr = Object.keys(set).map(Number);
+    [1,2,3].forEach(function(p){ if (arr.indexOf(p)===-1) arr.push(p); });
+    arr.sort(function(a,b){return a-b;});
+    return arr;
+  }
+
+  var db = null;
+  var didSeed = false, didMigrate = false;
+
+  // Tu proyecto de Firebase (console.firebase.google.com)
+  var FIREBASE_CONFIG = {
+    apiKey: "AIzaSyBTsBDuDlJ8L22-6TXFZigPgLFKHw8PpNc",
+    authDomain: "centro-medico-122c0.firebaseapp.com",
+    projectId: "centro-medico-122c0",
+    storageBucket: "centro-medico-122c0.firebasestorage.app",
+    messagingSenderId: "1003838678131",
+    appId: "1:1003838678131:web:150f2ddb92ff27ba55b606"
+  };
+
+  function init(){
+    try {
+      if (typeof firebase === 'undefined'){
+        renderFatal('No se pudo cargar Firebase. Revisa tu conexión e intenta de nuevo.');
+        return;
+      }
+      if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+      db = firebase.firestore();
+      subscribeAll();
+    } catch (err){
+      console.error(err);
+      renderFatal('No se pudo conectar con la base de datos. Revisa la configuración de Firebase.');
+    }
+  }
+
+  function subscribeAll(){
+    db.collection('consultorios').onSnapshot(function(snap){
+      var list = snap.docs.map(function(doc){ return Object.assign({id:doc.id}, doc.data()); });
+      list.sort(function(a,b){
+        if ((a.piso||0) !== (b.piso||0)) return (a.piso||0)-(b.piso||0);
+        return (a.pisoNumero||0)-(b.pisoNumero||0);
+      });
+      state.consultorios = list;
+      state.loaded.consultorios = true;
+      if (!didSeed && list.length === 0){ didSeed = true; seedConsultorios(); }
+      else if (!didMigrate && list.length > 0 && list.some(function(c){ return !c.piso; })){
+        didMigrate = true; migrateFloors(list);
+      }
+      render();
+    }, function(err){ console.error(err); });
+
+    db.collection('alquileres').onSnapshot(function(snap){
+      state.alquileres = snap.docs.map(function(doc){ return Object.assign({id:doc.id}, doc.data()); });
+      state.loaded.alquileres = true;
+      render();
+    }, function(err){ console.error(err); });
+
+    db.collection('pagos').onSnapshot(function(snap){
+      var map = {};
+      snap.docs.forEach(function(doc){ map[doc.id] = doc.data(); });
+      state.pagos = map;
+      state.loaded.pagos = true;
+      render();
+    }, function(err){ console.error(err); });
+
+    db.doc('config/centro').onSnapshot(function(snap){
+      if (snap.exists) state.config = Object.assign({telefonoContacto:'', emailContacto:'', mensajeRecordatorio:''}, snap.data());
+      state.loaded.config = true;
+      render();
+    }, function(err){ console.error(err); });
+  }
+
+  function seedConsultorios(){
+    for (var i=1;i<=36;i++){
+      var pn = pisoNombreInicial(i);
+      db.collection('consultorios').doc(String(i)).set({
+        numero:i, piso:pn.piso, pisoNumero:pn.pisoNumero,
+        nombre:'Piso ' + pn.piso + ' - Consultorio ' + pn.pisoNumero,
+        precioCompleto:0, precioDia:0, metrosCuadrados:0,
+        modalidadCompletoHabilitada:true, modalidadDiaHabilitada:true, notas:''
+      });
+    }
+  }
+  function migrateFloors(list){
+    list.forEach(function(c){
+      if (c.piso) return;
+      var pn = pisoNombreInicial(c.numero);
+      db.collection('consultorios').doc(String(c.id)).update({
+        piso: pn.piso, pisoNumero: pn.pisoNumero,
+        nombre: 'Piso ' + pn.piso + ' - Consultorio ' + pn.pisoNumero,
+        precioCompleto: c.precioCompleto || 0, precioDia: c.precioDia || 0
+      });
+    });
+    toast('Consultorios reorganizados por piso.');
+  }
+
+  function activeRentalsFor(consultorioId, excludeId){
+    return state.alquileres.filter(function(a){
+      return a.activo !== false && String(a.consultorioId) === String(consultorioId) && (!excludeId || a.id !== excludeId);
+    });
+  }
+  function roomStatus(consultorioId, excludeId){
+    var rentals = activeRentalsFor(consultorioId, excludeId);
+    var completo = rentals.find(function(a){ return a.modalidad === 'completo'; });
+    if (completo) return {tipo:'completo', rentals:[completo]};
+    var diaRentals = rentals.filter(function(a){ return a.modalidad === 'dia'; });
+    if (diaRentals.length > 0) return {tipo:'dia', rentals: diaRentals};
+    return {tipo:'vacio', rentals: []};
+  }
+  function slotOcupante(consultorioId, diaKey){
+    var rentals = activeRentalsFor(consultorioId);
+    var completo = rentals.find(function(a){ return a.modalidad === 'completo'; });
+    if (completo) return completo;
+    return rentals.find(function(a){ return a.modalidad === 'dia' && getDias(a).indexOf(diaKey)!==-1; }) || null;
+  }
+  function roomRevenue(consultorioId){
+    var st = roomStatus(consultorioId);
+    if (st.tipo === 'completo') return Number(st.rentals[0].precioMensual)||0;
+    if (st.tipo === 'dia') return st.rentals.reduce(function(s,r){ return s+(Number(r.precioMensual)||0); }, 0);
+    return 0;
+  }
+  function ocupadosDiasCount(st){
+    if (st.tipo !== 'dia') return 0;
+    return st.rentals.reduce(function(s,r){ return s + getDias(r).length; }, 0);
+  }
+  function stats(){
+    var totalRooms = state.consultorios.length;
+    var completos = 0, diaSlotsOcupados = 0, roomsVacios = 0, ingresoMensual = 0;
+    state.consultorios.forEach(function(c){
+      var st = roomStatus(c.id);
+      if (st.tipo === 'completo'){ completos++; ingresoMensual += roomRevenue(c.id); }
+      else if (st.tipo === 'dia'){ diaSlotsOcupados += ocupadosDiasCount(st); ingresoMensual += roomRevenue(c.id); }
+      else { roomsVacios++; }
+    });
+    var roomsNoCompleto = totalRooms - completos;
+    var diaSlotsTotales = roomsNoCompleto * 6;
+    return {
+      totalRooms: totalRooms, completos: completos, roomsVacios: roomsVacios,
+      diaSlotsOcupados: diaSlotsOcupados, diaSlotsTotales: diaSlotsTotales,
+      diaSlotsVacantes: diaSlotsTotales - diaSlotsOcupados,
+      ingresoMensual: ingresoMensual
+    };
+  }
+  function roomsByFloor(list){
+    var byFloor = {};
+    list.forEach(function(c){ var p=c.piso||1; (byFloor[p] = byFloor[p] || []).push(c); });
+    Object.keys(byFloor).forEach(function(k){ byFloor[k].sort(function(a,b){ return (a.pisoNumero||0)-(b.pisoNumero||0); }); });
+    return byFloor;
+  }
+
+  function render(){
+    if (!state.loaded.consultorios || !state.loaded.alquileres || !state.loaded.pagos || !state.loaded.config){
+      document.getElementById('main').innerHTML = '<div class="empty-note">Cargando…</div>';
+      return;
+    }
+    document.querySelectorAll('#nav button').forEach(function(b){ b.classList.toggle('active', b.dataset.view === state.view); });
+    var main = document.getElementById('main');
+    if (state.view === 'panel') main.innerHTML = renderPanel();
+    else if (state.view === 'consultorios') main.innerHTML = renderConsultorios();
+    else if (state.view === 'especialistas') main.innerHTML = renderEspecialistas();
+    else if (state.view === 'matriz') main.innerHTML = renderMatriz();
+    else if (state.view === 'cobros') main.innerHTML = renderCobros();
+    else if (state.view === 'compartir') main.innerHTML = renderCompartir();
+    else if (state.view === 'rentabilidad') main.innerHTML = renderRentabilidad();
+    bindViewEvents();
+    if (state.view === 'rentabilidad') setTimeout(drawRentabilidadCharts, 0);
+  }
+  function renderFatal(msg){ document.getElementById('main').innerHTML = '<div class="empty-note">' + escapeHtml(msg) + '</div>'; }
+
+  function heroCell(label, value, sub, accent){
+    return '<div class="hero-cell' + (accent ? ' accent-'+accent : '') + '">'
+      + '<div class="label">' + escapeHtml(label) + '</div>'
+      + '<div class="value">' + value + '</div>'
+      + '<div class="sub">' + escapeHtml(sub) + '</div></div>';
+  }
+
+  function renderPanel(){
+    var s = stats();
+    var vacantesLista = state.consultorios.filter(function(c){ return roomStatus(c.id).tipo === 'vacio'; });
+    var pendientesDia = [];
+    state.consultorios.forEach(function(c){
+      var st = roomStatus(c.id);
+      if (st.tipo === 'dia'){
+        var ocupados = st.rentals.reduce(function(acc,r){ return acc.concat(getDias(r)); }, []);
+        DIA_KEYS.forEach(function(dk){ if (ocupados.indexOf(dk) === -1) pendientesDia.push({consultorio:c, dia:dk}); });
+      }
+    });
+    var mk = monthKey();
+    var activos = state.alquileres.filter(function(a){ return a.activo !== false; });
+    var pendientesPago = activos.filter(function(a){ return !(state.pagos[a.id+'__'+mk] && state.pagos[a.id+'__'+mk].pagado); });
+    var pendienteMonto = pendientesPago.reduce(function(s,a){ return s + (Number(a.precioMensual)||0); }, 0);
+
+    return ''
+    + '<div class="view-head"><div><h2>Panel general</h2><p>Estado de tus consultorios y del alquiler mensual, actualizado en tiempo real.</p></div></div>'
+    + '<div class="hero-strip">'
+    +   heroCell('Consultorios completos', s.completos + ' / ' + s.totalRooms, 'ocupados por un solo especialista todo el mes', 'brick')
+    +   heroCell('Cupos por día ocupados', s.diaSlotsOcupados + ' / ' + s.diaSlotsTotales, 'lunes a sábado, en consultorios compartidos', 'brick')
+    +   heroCell('Consultorios totalmente vacíos', String(s.roomsVacios), 'listos para ofrecer en cualquier modalidad', 'moss')
+    +   heroCell('Ingreso mensual activo', money(s.ingresoMensual), 'suma de todos los alquileres vigentes', 'gold')
+    + '</div>'
+    + '<div class="panel-cols">'
+    +   '<div class="card"><div class="card-head"><h3>Espacio disponible para ofrecer</h3></div><div class="card-body">'
+    +     (vacantesLista.length === 0 ? '<p class="empty-note">No tienes consultorios completamente vacíos.</p>' :
+            '<table class="list"><thead><tr><th>Consultorio</th><th>Estado</th></tr></thead><tbody>' +
+            vacantesLista.map(function(c){ return '<tr><td>' + escapeHtml(c.nombre) + '</td><td><span class="tag vacio">Libre — cualquier modalidad</span></td></tr>'; }).join('') +
+            '</tbody></table>')
+    +     (pendientesDia.length === 0 ? '' :
+            '<table class="list" style="margin-top:.6rem"><thead><tr><th>Consultorio</th><th>Día libre</th></tr></thead><tbody>' +
+            pendientesDia.slice(0,12).map(function(p){ return '<tr><td>' + escapeHtml(p.consultorio.nombre) + '</td><td><span class="tag vacio">' + dayLabel(p.dia) + ' libre</span></td></tr>'; }).join('') +
+            (pendientesDia.length > 12 ? '<tr><td colspan="2" style="color:var(--ink-soft)">+' + (pendientesDia.length-12) + ' cupos más — ver Matriz semanal</td></tr>' : '') +
+            '</tbody></table>')
+    +     '<p style="margin-top:.7rem"><button class="btn ghost small" data-nav="compartir">Ver pestaña para compartir con doctores</button></p>'
+    +   '</div></div>'
+    +   '<div class="card"><div class="card-head"><h3>Cobros de ' + escapeHtml(monthLabel()) + '</h3></div><div class="card-body">'
+    +     '<table class="list"><tbody>'
+    +     '<tr><td>Alquileres activos</td><td class="mono" style="text-align:right">' + activos.length + '</td></tr>'
+    +     '<tr><td>Pendientes de cobro</td><td class="mono" style="text-align:right;color:var(--brick)">' + pendientesPago.length + '</td></tr>'
+    +     '<tr><td>Monto pendiente</td><td class="mono" style="text-align:right;color:var(--brick)">' + money(pendienteMonto) + '</td></tr>'
+    +     '</tbody></table>'
+    +     '<p style="margin-top:.7rem"><button class="btn ghost small" data-nav="cobros">Ir a Cobros del mes</button></p>'
+    +   '</div></div>'
+    + '</div>';
+  }
+
+  function renderConsultorios(){
+    var q = state.search.trim().toLowerCase();
+    var filterFn = function(c){
+      if (!q) return true;
+      var st = roomStatus(c.id);
+      var names = st.rentals.map(function(r){return r.especialista.nombre;}).join(' ').toLowerCase();
+      return c.nombre.toLowerCase().indexOf(q) !== -1 || names.indexOf(q) !== -1;
+    };
+    var rooms = state.consultorios.filter(filterFn);
+    var byFloor = roomsByFloor(rooms);
+    var pisos = pisosPresentes();
+
+    function roomCardHtml(c){
+      var st = roomStatus(c.id);
+      var cls = st.tipo === 'completo' ? 'completo' : (st.tipo === 'vacio' ? 'vacio' : '');
+      var statusHtml = '';
+      if (st.tipo === 'completo'){
+        var r0 = st.rentals[0];
+        statusHtml = escapeHtml(r0.especialista.nombre) + '<br><span style="color:var(--ink-soft)">' + escapeHtml(r0.especialista.especialidad||'') + '</span>'
+          + '<div class="revenue">Generando: ' + money(roomRevenue(c.id)) + '/mes</div>'
+          + '<button class="btn ghost small" style="margin-top:.45rem" data-edit-alquiler="' + r0.id + '">Editar</button> '
+          + '<button class="btn ghost small" style="margin-top:.45rem" data-liberar="' + r0.id + '">Liberar consultorio</button>';
+      } else if (st.tipo === 'dia'){
+        statusHtml = st.rentals.map(function(r){
+          return getDias(r).map(dayLabel).join(', ') + ': ' + escapeHtml(r.especialista.nombre)
+            + '<button class="mini-x" data-edit-alquiler="'+r.id+'">editar</button>'
+            + '<button class="mini-x danger-x" data-liberar="'+r.id+'">liberar</button>';
+        }).join('<br>');
+        var libres = 6 - ocupadosDiasCount(st);
+        if (libres > 0) statusHtml += '<br><span style="color:var(--moss)">' + libres + ' día(s) libres</span>';
+        statusHtml += '<div class="revenue">Generando: ' + money(roomRevenue(c.id)) + '/mes</div>';
+      } else {
+        statusHtml = '<span style="color:var(--moss)">Libre — sin alquilar</span>';
+      }
+      var flags = [];
+      if (!completoHabilitado(c)) flags.push('sin modalidad completo');
+      if (!diaHabilitado(c)) flags.push('sin modalidad por día');
+      var flagsHtml = flags.length ? '<div style="margin-top:.35rem"><span class="tag off">' + escapeHtml(flags.join(' · ')) + '</span></div>' : '';
+      var metrosHtml = c.metrosCuadrados>0 ? ' · ' + c.metrosCuadrados + ' m²' : '';
+      var sugerido = [];
+      if (c.precioCompleto>0) sugerido.push('Completo ' + money(c.precioCompleto));
+      if (c.precioDia>0) sugerido.push('Día ' + money(c.precioDia));
+      var sugeridoHtml = '<div class="suggested">' + (sugerido.length ? 'Sugerido — ' + sugerido.join(' · ') : 'Sin tarifa sugerida') + '</div>';
+      return '<div class="room-card ' + cls + '">'
+        + '<button class="edit-link" data-edit-room="' + c.id + '">tarifas</button>'
+        + '<div class="rn">CONS. ' + String(c.pisoNumero).padStart(2,'0') + escapeHtml(metrosHtml) + '</div>'
+        + '<div class="rname" data-room="' + c.id + '">' + escapeHtml(c.nombre) + '</div>'
+        + sugeridoHtml
+        + '<div class="rstatus">' + statusHtml + '</div>'
+        + flagsHtml
+        + '</div>';
+    }
+
+    var body;
+    if (q) {
+      body = '<div class="room-grid">' + rooms.map(roomCardHtml).join('') + '</div>';
+    } else {
+      body = pisos.map(function(p){
+        var rs = byFloor[p] || [];
+        if (rs.length === 0) return '<div class="floor-head">Piso ' + p + '</div><p class="empty-note">Sin consultorios en este piso todavía.</p>';
+        return '<div class="floor-head">Piso ' + p + '</div><div class="room-grid">' + rs.map(roomCardHtml).join('') + '</div>';
+      }).join('');
+    }
+
+    return ''
+    + '<div class="view-head"><div><h2>Consultorios</h2><p>Organizados por piso. Clic en el nombre para registrar un alquiler, en "tarifas" para precio, metros y modalidades, o usa "Editar"/"Liberar" cuando un especialista cambie datos o se vaya.</p></div>'
+    +   '<button class="btn" id="btn-new-consultorio">+ Agregar consultorio</button></div>'
+    + '<div class="toolbar"><input class="search-input" id="room-search" placeholder="Buscar consultorio o especialista…" value="' + escapeHtml(state.search) + '"></div>'
+    + '<div class="legend">'
+    +   '<span><span class="swatch" style="background:var(--brick)"></span>Ocupado</span>'
+    +   '<span><span class="swatch" style="background:var(--moss)"></span>Libre</span>'
+    + '</div>'
+    + body;
+  }
+
+  function renderEspecialistas(){
+    var q = state.search.trim().toLowerCase();
+    var rows = state.alquileres.filter(function(a){
+      if (!q) return true;
+      return a.especialista.nombre.toLowerCase().indexOf(q) !== -1 || (a.especialista.especialidad||'').toLowerCase().indexOf(q) !== -1;
+    }).sort(function(a,b){
+      if (a.activo === b.activo) return (a.especialista.nombre||'').localeCompare(b.especialista.nombre||'');
+      return a.activo === false ? 1 : -1;
+    });
+    var roomName = function(id){ var c = state.consultorios.find(function(x){return String(x.id)===String(id);}); return c ? c.nombre : ('Consultorio ' + id); };
+
+    return ''
+    + '<div class="view-head"><div><h2>Especialistas</h2><p>Todos los alquileres registrados, activos e históricos. Puedes editar cualquier dato o liberar el consultorio cuando el especialista se vaya.</p></div>'
+    +   '<button class="btn" id="btn-new-alquiler">+ Registrar alquiler</button></div>'
+    + '<div class="toolbar"><input class="search-input" id="esp-search" placeholder="Buscar por nombre o especialidad…" value="' + escapeHtml(state.search) + '"></div>'
+    + '<div class="card"><div class="card-body">'
+    + (rows.length === 0 ? '<p class="empty-note">Aún no hay alquileres registrados.</p>' :
+      '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Modalidad</th><th>Precio/mes</th><th>Día de pago</th><th>Depósito</th><th>Estado</th><th></th></tr></thead><tbody>'
+      + rows.map(function(a){
+          var modTag = a.modalidad === 'completo' ? '<span class="tag completo">Completo</span>' : '<span class="tag dia">' + getDias(a).map(dayLabel).join(', ') + '</span>';
+          var dep = a.deposito && a.deposito.dado ? '<span class="tag deposito">' + money(a.deposito.monto) + '</span>' : '<span class="tag sindep">No dio</span>';
+          var acciones = '<div class="actions-cell"><button class="btn ghost small" data-edit-alquiler="' + a.id + '">Editar</button>'
+            + '<button class="btn ghost small" data-historial="' + a.id + '">Historial</button>'
+            + (a.activo === false
+                ? '<button class="btn ghost small" data-delete="' + a.id + '">Eliminar</button>'
+                : '<button class="btn ghost small" data-liberar="' + a.id + '">Liberar consultorio</button>')
+            + '</div>';
+          return '<tr>'
+          + '<td><strong>' + escapeHtml(a.especialista.nombre) + '</strong><br><span style="color:var(--ink-soft)">' + escapeHtml(a.especialista.especialidad||'') + '</span></td>'
+          + '<td>' + escapeHtml(roomName(a.consultorioId)) + '</td>'
+          + '<td>' + modTag + '</td>'
+          + '<td class="mono">' + money(a.precioMensual) + '</td>'
+          + '<td class="mono">Día ' + escapeHtml(a.diaPago||'1') + '</td>'
+          + '<td>' + dep + '</td>'
+          + '<td>' + (a.activo === false ? '<span style="color:var(--ink-soft)">Finalizado</span>' : '<span style="color:var(--moss)">Activo</span>') + '</td>'
+          + '<td>' + acciones + '</td>'
+          + '</tr>';
+        }).join('')
+      + '</tbody></table>')
+    + '</div></div>';
+  }
+
+  function renderMatriz(){
+    var byFloor = roomsByFloor(state.consultorios);
+    var pisos = pisosPresentes();
+    var rowsHtml = '';
+    pisos.forEach(function(p){
+      (byFloor[p]||[]).forEach(function(c, idx){
+        var st = roomStatus(c.id);
+        var cells = '';
+        var brk = idx===0 ? 'floorbreak ' : '';
+        if (st.tipo === 'completo'){
+          cells = '<td class="' + brk + 'completo-cell" colspan="6" data-liberar="'+st.rentals[0].id+'" title="Clic para liberar">' + escapeHtml(st.rentals[0].especialista.nombre) + ' — todo el mes</td>';
+        } else {
+          cells = DIA_KEYS.map(function(dk){
+            var oc = slotOcupante(c.id, dk);
+            if (oc) return '<td class="' + brk + 'slot ocupado" data-liberar="'+oc.id+'" title="'+escapeHtml(oc.especialista.nombre)+' — clic para liberar">' + escapeHtml(shorten(oc.especialista.nombre)) + '</td>';
+            return '<td class="' + brk + 'slot vacante" data-room="'+c.id+'" data-dia="'+dk+'" title="Asignar '+dayLabel(dk)+'">Libre</td>';
+          }).join('');
+        }
+        rowsHtml += '<tr><td class="rn' + (idx===0?' floorbreak':'') + '">' + escapeHtml(c.nombre) + '</td>' + cells + '</tr>';
+      });
+    });
+
+    return ''
+    + '<div class="view-head"><div><h2>Matriz semanal</h2><p>Vista de lunes a sábado, agrupada por piso. Clic en una celda libre para asignarla, o en una ocupada para liberarla.</p></div></div>'
+    + '<div class="legend">'
+    +   '<span><span class="swatch" style="background:var(--brick)"></span>Ocupado — clic para liberar</span>'
+    +   '<span><span class="swatch" style="background:var(--moss)"></span>Libre — clic para asignar</span>'
+    + '</div>'
+    + '<div class="matrix-wrap"><table class="matrix">'
+    + '<thead><tr><th class="rn-h">Consultorio</th>' + DIAS.map(function(d){return '<th>'+d.short+'</th>';}).join('') + '</tr></thead>'
+    + '<tbody>' + rowsHtml + '</tbody>'
+    + '</table></div>';
+  }
+
+  function renderCobros(){
+    var mk = monthKey();
+    var activos = state.alquileres.filter(function(a){ return a.activo !== false; });
+    var roomName = function(id){ var c = state.consultorios.find(function(x){return String(x.id)===String(id);}); return c ? c.nombre : ('Consultorio ' + id); };
+    var totalEsperado = activos.reduce(function(s,a){ return s+(Number(a.precioMensual)||0); }, 0);
+    var totalCobrado = activos.reduce(function(s,a){ var p = state.pagos[a.id+'__'+mk]; return s + ((p&&p.pagado) ? (Number(a.precioMensual)||0) : 0); }, 0);
+
+    var conDeuda = state.alquileres
+      .map(function(a){ return { a:a, debt: rentalDebt(a) }; })
+      .filter(function(x){ return x.debt.mesesPendientes > 0; })
+      .sort(function(x,y){ return y.debt.monto - x.debt.monto; });
+    var doctoresEnMora = conDeuda.length;
+    var mesesPendientesTotal = conDeuda.reduce(function(s,x){ return s+x.debt.mesesPendientes; }, 0);
+    var montoMorosidad = conDeuda.reduce(function(s,x){ return s+x.debt.monto; }, 0);
+
+    return ''
+    + '<div class="view-head"><div><h2>Cobros — ' + escapeHtml(monthLabel()) + '</h2><p>Marca cada alquiler como cobrado a medida que recibas el pago del mes.</p></div></div>'
+    + '<div class="hero-strip">'
+    +   heroCell('Total esperado este mes', money(totalEsperado), activos.length + ' alquileres activos', 'gold')
+    +   heroCell('Cobrado', money(totalCobrado), 'confirmado en ' + monthLabel(), 'moss')
+    +   heroCell('Pendiente este mes', money(totalEsperado-totalCobrado), 'aún por cobrar', 'brick')
+    + '</div>'
+    + '<div class="card"><div class="card-body">'
+    + (activos.length === 0 ? '<p class="empty-note">No hay alquileres activos este mes.</p>' :
+      '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Modalidad</th><th>Precio</th><th>Día de pago</th><th>Este mes</th></tr></thead><tbody>'
+      + activos.map(function(a){
+          var p = state.pagos[a.id+'__'+mk];
+          var pagado = !!(p && p.pagado);
+          var modTag = a.modalidad === 'completo' ? 'Completo' : getDias(a).map(dayLabel).join(', ');
+          return '<tr>'
+          + '<td>' + escapeHtml(a.especialista.nombre) + '</td>'
+          + '<td>' + escapeHtml(roomName(a.consultorioId)) + '</td>'
+          + '<td>' + modTag + '</td>'
+          + '<td class="mono">' + money(a.precioMensual) + '</td>'
+          + '<td class="mono">Día ' + escapeHtml(a.diaPago||'1') + '</td>'
+          + '<td><button class="btn ' + (pagado ? 'ghost' : '') + ' small" data-pago="' + a.id + '">' + (pagado ? 'Cobrado ✓' : 'Marcar cobrado') + '</button></td>'
+          + '</tr>';
+        }).join('')
+      + '</tbody></table>')
+    + '</div></div>'
+    + '<div class="view-head" style="margin-top:1.8rem"><div><h2 style="font-size:1.15rem">Morosidad — pagos pendientes acumulados</h2><p>Se calcula automáticamente para cada alquiler según su fecha de inicio y su día de pago: todo ciclo mensual ya vencido y no marcado como cobrado cuenta como deuda, mes tras mes.</p></div>'
+    +   '<button class="btn ghost small" id="btn-edit-mensaje">Editar mensaje de recordatorio</button></div>'
+    + '<div class="hero-strip">'
+    +   heroCell('Doctores en mora', String(doctoresEnMora), 'con al menos un mes sin pagar', doctoresEnMora>0?'brick':'moss')
+    +   heroCell('Meses pendientes (total)', String(mesesPendientesTotal), 'sumando todos los alquileres', doctoresEnMora>0?'brick':'moss')
+    +   heroCell('Monto adeudado (total)', money(montoMorosidad), 'activos e históricos', doctoresEnMora>0?'brick':'moss')
+    + '</div>'
+    + '<div class="card"><div class="card-body">'
+    + (conDeuda.length === 0 ? '<p class="empty-note">Ningún especialista tiene pagos pendientes. 🎉</p>' :
+      '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Estado alquiler</th><th>Meses pendientes</th><th>Monto adeudado</th><th></th></tr></thead><tbody>'
+      + conDeuda.map(function(x){
+          var a = x.a, d = x.debt;
+          var room = roomName(a.consultorioId);
+          var waUrl = buildWhatsAppUrl(a, d, room);
+          return '<tr>'
+          + '<td>' + escapeHtml(a.especialista.nombre) + '</td>'
+          + '<td>' + escapeHtml(room) + '</td>'
+          + '<td>' + (a.activo === false ? '<span style="color:var(--ink-soft)">Finalizado</span>' : '<span style="color:var(--moss)">Activo</span>') + '</td>'
+          + '<td class="mono" style="color:var(--brick)">' + d.mesesPendientes + '</td>'
+          + '<td class="mono" style="color:var(--brick)">' + money(d.monto) + '</td>'
+          + '<td><div class="actions-cell"><button class="btn ghost small" data-historial="' + a.id + '">Ver historial</button>'
+          + (waUrl ? '<button class="btn small" data-whatsapp-url="' + escapeHtml(waUrl) + '" style="background:#25D366;border-color:#25D366">Recordar por WhatsApp</button>' : '<span class="tag sindep">Sin teléfono</span>')
+          + '</div></td>'
+          + '</tr>';
+        }).join('')
+      + '</tbody></table>')
+    + '</div></div>';
+  }
+
+  function computeOfertas(){
+    var byFloor = roomsByFloor(state.consultorios);
+    var pisos = pisosPresentes();
+    var out = [];
+    pisos.forEach(function(p){
+      var items = [];
+      (byFloor[p]||[]).forEach(function(c){
+        var st = roomStatus(c.id);
+        if (st.tipo === 'completo') return;
+        if (st.tipo === 'vacio'){
+          var showC = completoHabilitado(c), showD = diaHabilitado(c);
+          if (showC || showD) items.push({consultorio:c, tipo:'vacio', showCompleto:showC, showDia:showD});
+        } else {
+          if (!diaHabilitado(c)) return;
+          var ocupados = st.rentals.reduce(function(acc,r){ return acc.concat(getDias(r)); }, []);
+          var libres = DIA_KEYS.filter(function(d){ return ocupados.indexOf(d)===-1; });
+          if (libres.length > 0) items.push({consultorio:c, tipo:'dias', libres:libres});
+        }
+      });
+      if (items.length > 0) out.push({piso:p, items:items});
+    });
+    return out;
+  }
+
+  function renderCompartir(){
+    var ofertas = computeOfertas();
+    var totalOfertas = ofertas.reduce(function(n,f){ return n + f.items.length; }, 0);
+
+    function offerCardHtml(item){
+      var c = item.consultorio;
+      var priceC = c.precioCompleto>0 ? money(c.precioCompleto)+' / mes' : 'Precio a consultar';
+      var priceD = c.precioDia>0 ? money(c.precioDia)+' / mes' : 'Precio a consultar';
+      var metros = c.metrosCuadrados>0 ? '<span class="om2">' + c.metrosCuadrados + ' m²</span>' : '';
+      var lines = '';
+      if (item.tipo === 'vacio'){
+        if (item.showCompleto) lines += '<div class="offer-line"><span>Consultorio completo (todo el mes)</span><span class="offer-price">' + priceC + '</span></div>';
+        if (item.showDia) lines += '<div class="offer-line"><span>Por día — elige tu día fijo</span><span class="offer-price">' + priceD + '</span></div>';
+      } else {
+        lines = '<div class="offer-line"><span>Días disponibles: ' + item.libres.map(dayLabel).join(', ') + '</span><span class="offer-price">' + priceD + '</span></div>';
+      }
+      return '<div class="offer-card"><div class="oname"><span>' + escapeHtml(c.nombre) + '</span>' + metros + '</div>' + lines + '</div>';
+    }
+
+    var contactoHtml = '<div class="contact-card"><h3 style="margin:0 0 .3rem;font-size:.95rem">Contacto para agendar una visita</h3>'
+      + '<p style="margin:0;color:var(--ink-soft);font-size:.85rem">Estos datos aparecen en la página que descargues para enviar a los doctores interesados.</p>'
+      + '<div class="row2">'
+      +   '<div class="field"><label>Teléfono</label><input id="cfg-telefono" value="' + escapeHtml(state.config.telefonoContacto) + '" placeholder="809-000-0000"></div>'
+      +   '<div class="field"><label>Email</label><input id="cfg-email" value="' + escapeHtml(state.config.emailContacto) + '" placeholder="contacto@centromedico.com"></div>'
+      + '</div></div>';
+
+    return ''
+    + '<div class="view-head"><div><h2>Compartir con doctores</h2><p>Así ven la disponibilidad los especialistas interesados. Descarga esta página como un archivo y envíala por correo o WhatsApp — se abre en cualquier navegador, sin necesidad de acceso a este panel.</p></div>'
+    +   '<button class="btn" id="btn-download-share">Descargar página para enviar</button></div>'
+    + contactoHtml
+    + (totalOfertas === 0 ? '<p class="empty-note">No hay espacios disponibles en este momento.</p>' :
+        ofertas.map(function(f){
+          return '<div class="floor-head">Piso ' + f.piso + '</div>' + f.items.map(offerCardHtml).join('');
+        }).join(''))
+    + '<p style="margin-top:1.6rem;color:var(--ink-soft);font-size:.82rem">Horario del centro: lunes a viernes 7:00am–6:00pm · sábados 7:00am–4:00pm · domingos cerrado.</p>';
+  }
+
+  function buildPublicSnapshotHtml(){
+    var ofertas = computeOfertas();
+    var fecha = new Date().toLocaleDateString('es-DO', {day:'numeric', month:'long', year:'numeric'});
+    function offerHtml(item){
+      var c = item.consultorio;
+      var priceC = c.precioCompleto>0 ? money(c.precioCompleto)+' / mes' : 'Precio a consultar';
+      var priceD = c.precioDia>0 ? money(c.precioDia)+' / mes' : 'Precio a consultar';
+      var metros = c.metrosCuadrados>0 ? ' <span style="color:#726C82;font-weight:400">· ' + c.metrosCuadrados + ' m²</span>' : '';
+      var lines = '';
+      if (item.tipo === 'vacio'){
+        if (item.showCompleto) lines += '<div class="l"><span>Consultorio completo (todo el mes)</span><b>' + priceC + '</b></div>';
+        if (item.showDia) lines += '<div class="l"><span>Por día — elige tu día fijo</span><b>' + priceD + '</b></div>';
+      } else {
+        lines = '<div class="l"><span>Días disponibles: ' + item.libres.map(dayLabel).join(', ') + '</span><b>' + priceD + '</b></div>';
+      }
+      return '<div class="card"><div class="t">' + escapeHtml(c.nombre) + metros + '</div>' + lines + '</div>';
+    }
+    var body = ofertas.length === 0 ? '<p>En este momento no hay consultorios disponibles.</p>' :
+      ofertas.map(function(f){ return '<h3>Piso ' + f.piso + '</h3>' + f.items.map(offerHtml).join(''); }).join('');
+    var contacto = (state.config.telefonoContacto || state.config.emailContacto)
+      ? '<p class="contact">Contacto: ' + [escapeHtml(state.config.telefonoContacto), escapeHtml(state.config.emailContacto)].filter(Boolean).join(' · ') + '</p>' : '';
+
+    return '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1">'
+      + '<title>Consultorios disponibles</title><style>'
+      + "body{font-family:-apple-system,'Segoe UI',sans-serif;background:#F3F1F7;color:#3A3448;margin:0;padding:2rem 1.2rem;max-width:640px;margin:0 auto;}"
+      + "h1{font-size:1.35rem;margin:0 0 .2rem;} .sub{color:#726C82;font-size:.85rem;margin:0 0 1.6rem;}"
+      + "h3{font-size:.85rem;color:#726C82;border-top:1px solid #E1DCEC;padding-top:1rem;margin:1.4rem 0 .6rem;} h3:first-of-type{border-top:none;padding-top:0;}"
+      + ".card{border:1px solid #E1DCEC;border-radius:6px;background:#FFFFFF;padding:.9rem 1rem;margin-bottom:.6rem;}"
+      + ".t{font-weight:600;margin-bottom:.4rem;} .l{display:flex;justify-content:space-between;font-size:.88rem;padding:.25rem 0;border-top:1px solid #E1DCEC;} .l:first-of-type{border-top:none;}"
+      + ".contact{margin-top:1.6rem;font-size:.85rem;color:#726C82;} .hours{font-size:.8rem;color:#726C82;}"
+      + '</style></head><body>'
+      + '<h1>Consultorios disponibles</h1>'
+      + '<p class="sub">Actualizado el ' + fecha + '</p>'
+      + body
+      + '<p class="hours">Horario del centro: lunes a viernes 7:00am–6:00pm · sábados 7:00am–4:00pm · domingos cerrado.</p>'
+      + contacto
+      + '</body></html>';
+  }
+
+  function renderRentabilidad(){
+    var s = stats();
+    var potencialPerdido = 0, sinTarifa = 0;
+    state.consultorios.forEach(function(c){
+      var st = roomStatus(c.id);
+      if (st.tipo === 'vacio'){
+        if (c.precioCompleto>0) potencialPerdido += Number(c.precioCompleto); else sinTarifa++;
+      } else if (st.tipo === 'dia'){
+        var libres = 6 - ocupadosDiasCount(st);
+        if (libres>0){ if (c.precioDia>0) potencialPerdido += libres*Number(c.precioDia)/6; else sinTarifa++; }
+      }
+    });
+    var oportunidades = [];
+    state.consultorios.forEach(function(c){
+      var st = roomStatus(c.id);
+      if (st.tipo === 'vacio' && c.precioCompleto>0) oportunidades.push({c:c, valor:Number(c.precioCompleto), detalle:'Vacío — completo'});
+      else if (st.tipo === 'dia'){
+        var libres = 6 - ocupadosDiasCount(st);
+        if (libres>0 && c.precioDia>0) oportunidades.push({c:c, valor:libres*Number(c.precioDia)/6, detalle: libres + ' día(s) libres'});
+      }
+    });
+    oportunidades.sort(function(a,b){ return b.valor-a.valor; });
+
+    return ''
+    + '<div class="view-head"><div><h2>Rentabilidad por consultorio</h2><p>Ingreso mensual real de cada consultorio y cuánto ingreso potencial se está dejando de captar, según las tarifas sugeridas que fijaste.</p></div></div>'
+    + '<div class="hero-strip">'
+    +   heroCell('Ingreso mensual actual', money(s.ingresoMensual), 'suma de todos los alquileres vigentes', 'gold')
+    +   heroCell('Potencial no capturado', money(potencialPerdido), 'según tarifas sugeridas en espacios vacíos', 'brick')
+    +   heroCell('Consultorios sin tarifa fijada', String(sinTarifa), 'no se pueden estimar — edítalos en Consultorios', 'moss')
+    + '</div>'
+    + '<div class="card chart-card" style="margin-bottom:1.2rem"><h3>Ingreso mensual por consultorio</h3><div class="chart-box"><canvas id="chart-ingresos"></canvas></div></div>'
+    + '<div class="panel-cols">'
+    +   '<div class="card chart-card"><h3>Ingreso actual vs. potencial no capturado</h3><div class="chart-box small"><canvas id="chart-distribucion"></canvas></div></div>'
+    +   '<div class="card"><div class="card-head"><h3>Mayores oportunidades</h3></div><div class="card-body">'
+    +     (oportunidades.length === 0 ? '<p class="empty-note">No hay oportunidades estimables — fija tarifas sugeridas en los consultorios vacíos.</p>' :
+          '<table class="list"><thead><tr><th>Consultorio</th><th>Detalle</th><th>Valor/mes</th></tr></thead><tbody>'
+          + oportunidades.slice(0,10).map(function(o){
+              return '<tr><td>' + escapeHtml(o.c.nombre) + '</td><td>' + escapeHtml(o.detalle) + '</td><td class="mono" style="color:var(--brick)">' + money(o.valor) + '</td></tr>';
+            }).join('')
+          + '</tbody></table>')
+    +   '</div></div>'
+    + '</div>';
+  }
+
+  function drawRentabilidadCharts(){
+    if (typeof Chart === 'undefined') return;
+    var rooms = [];
+    var bf = roomsByFloor(state.consultorios);
+    pisosPresentes().forEach(function(p){ (bf[p]||[]).forEach(function(c){ rooms.push(c); }); });
+    var labels = rooms.map(function(c){ return 'P' + c.piso + 'C' + c.pisoNumero; });
+    var revenues = rooms.map(function(c){ return roomRevenue(c.id); });
+    var brick = cssVar('--brick'), moss = cssVar('--moss'), gold = cssVar('--gold'), ink = cssVar('--ink'), inkSoft = cssVar('--ink-soft');
+    var colors = revenues.map(function(v){ return v>0 ? brick : moss; });
+
+    var elIngresos = document.getElementById('chart-ingresos');
+    if (elIngresos){
+      if (charts.ingresos) charts.ingresos.destroy();
+      charts.ingresos = new Chart(elIngresos.getContext('2d'), {
+        type:'bar',
+        data:{ labels:labels, datasets:[{ label:'Ingreso mensual (RD$)', data:revenues, backgroundColor:colors, borderRadius:3, maxBarThickness:22 }] },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:function(ctx){ return money(ctx.parsed.y); } } } },
+          scales:{
+            x:{ ticks:{ font:{family:"'IBM Plex Mono', monospace", size:9}, color:inkSoft, maxRotation:90, minRotation:90 }, grid:{ display:false } },
+            y:{ beginAtZero:true, ticks:{ color:inkSoft, font:{family:"'IBM Plex Sans', sans-serif", size:10}, callback:function(v){ return 'RD$ ' + Number(v).toLocaleString('es-DO'); } }, grid:{ color:cssVar('--line') } }
+          }
+        }
+      });
+    }
+
+    var ingresoActual = revenues.reduce(function(a,b){return a+b;},0);
+    var potencialPerdido = 0;
+    state.consultorios.forEach(function(c){
+      var st = roomStatus(c.id);
+      if (st.tipo === 'vacio'){ potencialPerdido += Number(c.precioCompleto)||0; }
+      else if (st.tipo === 'dia'){ var libres = 6-ocupadosDiasCount(st); potencialPerdido += libres*(Number(c.precioDia)||0)/6; }
+    });
+    var elDist = document.getElementById('chart-distribucion');
+    if (elDist){
+      if (charts.distribucion) charts.distribucion.destroy();
+      charts.distribucion = new Chart(elDist.getContext('2d'), {
+        type:'doughnut',
+        data:{ labels:['Ingreso actual','Potencial no capturado'], datasets:[{ data:[ingresoActual, potencialPerdido], backgroundColor:[gold, brick], borderColor:cssVar('--paper-raised'), borderWidth:2 }] },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{ position:'bottom', labels:{ color:ink, font:{family:"'IBM Plex Sans', sans-serif", size:11}, boxWidth:12 } },
+            tooltip:{ callbacks:{ label:function(ctx){ return ctx.label + ': ' + money(ctx.parsed); } } } }
+        }
+      });
+    }
+  }
+
+  function bindViewEvents(){
+    var main = document.getElementById('main');
+
+    var roomSearch = document.getElementById('room-search');
+    if (roomSearch) roomSearch.oninput = function(e){ state.search = e.target.value; render(); setTimeout(function(){var i=document.getElementById('room-search'); if(i){i.focus(); i.setSelectionRange(i.value.length,i.value.length);}},0); };
+    var espSearch = document.getElementById('esp-search');
+    if (espSearch) espSearch.oninput = function(e){ state.search = e.target.value; render(); setTimeout(function(){var i=document.getElementById('esp-search'); if(i){i.focus(); i.setSelectionRange(i.value.length,i.value.length);}},0); };
+
+    main.querySelectorAll('[data-nav]').forEach(function(b){ b.onclick = function(){ setView(b.dataset.nav); }; });
+
+    main.querySelectorAll('[data-room]').forEach(function(el){
+      el.onclick = function(){ openAlquilerModal({ consultorioId: el.dataset.room, dia: el.dataset.dia || null }); };
+    });
+    main.querySelectorAll('[data-edit-room]').forEach(function(el){
+      el.onclick = function(e){ e.stopPropagation(); openTarifaModal(el.dataset.editRoom); };
+    });
+    main.querySelectorAll('[data-edit-alquiler]').forEach(function(el){
+      el.onclick = function(e){
+        e.stopPropagation();
+        var rental = state.alquileres.find(function(x){ return x.id === el.dataset.editAlquiler; });
+        if (rental) openAlquilerModal({ editRental: rental });
+      };
+    });
+    main.querySelectorAll('[data-liberar]').forEach(function(el){
+      el.onclick = function(e){ e.stopPropagation(); openLiberarModal(el.dataset.liberar); };
+    });
+    main.querySelectorAll('[data-delete]').forEach(function(el){
+      el.onclick = function(e){ e.stopPropagation(); confirmDeleteAlquiler(el.dataset.delete); };
+    });
+
+    var btnNew = document.getElementById('btn-new-alquiler');
+    if (btnNew) btnNew.onclick = function(){ openAlquilerModal({}); };
+    var btnNewRoom = document.getElementById('btn-new-consultorio');
+    if (btnNewRoom) btnNewRoom.onclick = function(){ openNuevoConsultorioModal(); };
+
+    main.querySelectorAll('[data-pago]').forEach(function(b){ b.onclick = function(){ togglePago(b.dataset.pago); }; });
+    main.querySelectorAll('[data-historial]').forEach(function(b){ b.onclick = function(){ openHistorialPagosModal(b.dataset.historial); }; });
+    main.querySelectorAll('[data-whatsapp-url]').forEach(function(b){ b.onclick = function(){ window.open(b.dataset.whatsappUrl, '_blank'); }; });
+    var btnEditMsg = document.getElementById('btn-edit-mensaje');
+    if (btnEditMsg) btnEditMsg.onclick = function(){ openMensajeRecordatorioModal(); };
+
+    var cfgTel = document.getElementById('cfg-telefono');
+    var cfgEmail = document.getElementById('cfg-email');
+    if (cfgTel) cfgTel.onchange = function(e){ db.doc('config/centro').set(Object.assign({}, state.config, {telefonoContacto: e.target.value})); };
+    if (cfgEmail) cfgEmail.onchange = function(e){ db.doc('config/centro').set(Object.assign({}, state.config, {emailContacto: e.target.value})); };
+
+    var btnDl = document.getElementById('btn-download-share');
+    if (btnDl) btnDl.onclick = function(){
+      try {
+        var blob = new Blob([buildPublicSnapshotHtml()], {type:'text/html'});
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = 'consultorios-disponibles.html';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+        toast('Archivo descargado. Ya puedes enviarlo por correo o WhatsApp.');
+      } catch (err){ console.error(err); toast('No se pudo generar la descarga.'); }
+    };
+  }
+
+  function setView(v){ state.view = v; state.search=''; render(); }
+  document.getElementById('nav').addEventListener('click', function(e){
+    var btn = e.target.closest('button[data-view]');
+    if (btn) setView(btn.dataset.view);
+  });
+
+  // Generic in-app confirmation modal (no window.confirm — unreliable inside sandboxed iframes)
+  function openConfirmModal(opts){
+    var root = document.getElementById('modal-root');
+    root.innerHTML = ''
+      + '<div class="overlay" id="modal-overlay"><div class="modal">'
+      +   '<div class="modal-head"><h3>' + escapeHtml(opts.title) + '</h3><button id="modal-close">✕</button></div>'
+      +   '<div class="modal-body"><p style="margin:0;color:var(--ink-soft);font-size:.9rem">' + escapeHtml(opts.message) + '</p></div>'
+      +   '<div class="modal-foot"><div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button><button class="btn ' + (opts.danger?'danger':'') + '" id="modal-confirm">' + escapeHtml(opts.confirmLabel) + '</button></div></div>'
+      + '</div></div>';
+    document.getElementById('modal-close').onclick = closeModal;
+    document.getElementById('modal-cancel').onclick = closeModal;
+    document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+    document.getElementById('modal-confirm').onclick = function(){
+      closeModal();
+      opts.onConfirm();
+    };
+  }
+
+  function openLiberarModal(rentalId){
+    var a = state.alquileres.find(function(x){return x.id===rentalId;});
+    if (!a) return;
+    var root = document.getElementById('modal-root');
+    root.innerHTML = ''
+      + '<div class="overlay" id="modal-overlay"><div class="modal">'
+      +   '<div class="modal-head"><h3>Liberar consultorio</h3><button id="modal-close">✕</button></div>'
+      +   '<div class="modal-body">'
+      +     '<p style="margin:0;color:var(--ink-soft);font-size:.9rem">¿Qué deseas hacer con el alquiler de <strong>' + escapeHtml(a.especialista.nombre) + '</strong>?</p>'
+      +     '<button class="btn" id="btn-finalizar">Finalizar y guardar en el historial</button>'
+      +     '<p class="hint" style="margin:-.4rem 0 0">El espacio queda libre de inmediato; el registro se conserva para el reporte de rentabilidad.</p>'
+      +     '<button class="btn danger" id="btn-eliminar">Eliminar definitivamente</button>'
+      +     '<p class="hint" style="margin:-.4rem 0 0">Borra el registro por completo. Esta acción no se puede deshacer.</p>'
+      +   '</div>'
+      +   '<div class="modal-foot"><div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button></div></div>'
+      + '</div></div>';
+    document.getElementById('modal-close').onclick = closeModal;
+    document.getElementById('modal-cancel').onclick = closeModal;
+    document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+    document.getElementById('btn-finalizar').onclick = function(){
+      db.collection('alquileres').doc(rentalId).update({activo:false, fechaFin: new Date().toISOString().slice(0,10)}).then(function(){
+        toast('Consultorio liberado.');
+      }).catch(function(err){ console.error(err); toast('No se pudo liberar. Intenta de nuevo.'); });
+    };
+    document.getElementById('btn-eliminar').onclick = function(){
+      openConfirmModal({
+        title: 'Eliminar definitivamente',
+        message: 'Esta acción no se puede deshacer. Se eliminará por completo el alquiler de ' + a.especialista.nombre + '.',
+        confirmLabel: 'Sí, eliminar',
+        danger: true,
+        onConfirm: function(){
+          db.collection('alquileres').doc(rentalId).delete().then(function(){
+            toast('Alquiler eliminado.');
+          }).catch(function(err){ console.error(err); toast('No se pudo eliminar. Intenta de nuevo.'); });
+        }
+      });
+    };
+  }
+  function confirmDeleteAlquiler(rentalId){
+    var a = state.alquileres.find(function(x){return x.id===rentalId;});
+    if (!a) return;
+    openConfirmModal({
+      title: 'Eliminar registro',
+      message: 'Esta acción no se puede deshacer. Se eliminará por completo el registro de ' + a.especialista.nombre + '.',
+      confirmLabel: 'Sí, eliminar',
+      danger: true,
+      onConfirm: function(){
+        db.collection('alquileres').doc(rentalId).delete().then(function(){
+          toast('Alquiler eliminado.');
+        }).catch(function(err){ console.error(err); toast('No se pudo eliminar. Intenta de nuevo.'); });
+      }
+    });
+  }
+  function togglePago(alquilerId, periodKey){
+    var mk = periodKey || monthKey();
+    var key = alquilerId + '__' + mk;
+    var current = state.pagos[key];
+    var next = !(current && current.pagado);
+    db.collection('pagos').doc(key).set({ alquilerId: alquilerId, mes: mk, pagado: next, fecha: new Date().toISOString() }).then(function(){
+      toast(next ? 'Marcado como cobrado.' : 'Marcado como pendiente.');
+    }).catch(function(err){ console.error(err); toast('No se pudo actualizar el pago.'); });
+  }
+
+  function openHistorialPagosModal(rentalId){
+    var a = state.alquileres.find(function(x){return x.id===rentalId;});
+    if (!a) return;
+    function draw(){
+      var debt = rentalDebt(a);
+      var periods = billingPeriods(a).slice().reverse();
+      var root = document.getElementById('modal-root');
+      root.innerHTML = ''
+        + '<div class="overlay" id="modal-overlay"><div class="modal">'
+        +   '<div class="modal-head"><h3>Historial de pagos — ' + escapeHtml(a.especialista.nombre) + '</h3><button id="modal-close">✕</button></div>'
+        +   '<div class="modal-body">'
+        +     '<div class="hero-strip" style="margin-bottom:0">'
+        +       heroCell('Meses pendientes', String(debt.mesesPendientes), 'desde ' + (a.fechaInicio||'—'), debt.mesesPendientes>0?'brick':'moss')
+        +       heroCell('Monto adeudado', money(debt.monto), 'a ' + money(a.precioMensual) + '/mes', debt.mesesPendientes>0?'brick':'moss')
+        +     '</div>'
+        +     (periods.length === 0 ? '<p class="empty-note">Aún no se cumple ningún ciclo de pago para este alquiler.</p>' :
+              '<table class="list"><thead><tr><th>Mes</th><th>Vence</th><th>Estado</th></tr></thead><tbody>'
+              + periods.map(function(p){
+                  var pg = state.pagos[a.id+'__'+p.key];
+                  var pagado = !!(pg && pg.pagado);
+                  return '<tr><td>' + escapeHtml(periodLabel(p.key)) + '</td>'
+                    + '<td class="mono">Día ' + p.due.getDate() + '</td>'
+                    + '<td><button class="btn ' + (pagado?'ghost':'') + ' small" data-hist-pago="' + p.key + '">' + (pagado?'Cobrado ✓':'Marcar cobrado') + '</button></td></tr>';
+                }).join('')
+              + '</tbody></table>')
+        +   '</div>'
+        +   '<div class="modal-foot"><div class="right"><button class="btn ghost" id="modal-cancel">Cerrar</button></div></div>'
+        + '</div></div>';
+      document.getElementById('modal-close').onclick = closeModal;
+      document.getElementById('modal-cancel').onclick = closeModal;
+      document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+      root.querySelectorAll('[data-hist-pago]').forEach(function(b){
+        b.onclick = function(){
+          var mk = b.dataset.histPago;
+          var key = a.id + '__' + mk;
+          var current = state.pagos[key];
+          var next = !(current && current.pagado);
+          db.collection('pagos').doc(key).set({ alquilerId: a.id, mes: mk, pagado: next, fecha: new Date().toISOString() }).then(function(){
+            toast(next ? 'Marcado como cobrado.' : 'Marcado como pendiente.');
+            draw();
+          }).catch(function(err){ console.error(err); toast('No se pudo actualizar el pago.'); });
+        };
+      });
+    }
+    draw();
+  }
+
+  function openMensajeRecordatorioModal(){
+    var root = document.getElementById('modal-root');
+    var current = mensajeRecordatorioTemplate();
+    root.innerHTML = ''
+      + '<div class="overlay" id="modal-overlay"><div class="modal">'
+      +   '<div class="modal-head"><h3>Mensaje de recordatorio</h3><button id="modal-close">✕</button></div>'
+      +   '<div class="modal-body">'
+      +     '<div class="field"><label>Texto del mensaje</label>'
+      +       '<textarea id="f-mensaje" rows="6" style="width:100%;padding:.55rem .6rem;border:1px solid var(--line);border-radius:4px;background:var(--paper);color:var(--ink);font-size:.9rem;font-family:inherit">' + escapeHtml(current) + '</textarea>'
+      +       '<div class="hint">Variables disponibles: {nombre}, {meses}, {monto}, {consultorio}. Se reemplazan automáticamente por los datos de cada especialista al enviar.</div>'
+      +     '</div>'
+      +   '</div>'
+      +   '<div class="modal-foot"><button class="btn ghost" id="btn-restore-default">Restaurar predeterminado</button><div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button><button class="btn" id="modal-save-mensaje">Guardar</button></div></div>'
+      + '</div></div>';
+    document.getElementById('modal-close').onclick = closeModal;
+    document.getElementById('modal-cancel').onclick = closeModal;
+    document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+    document.getElementById('btn-restore-default').onclick = function(){ document.getElementById('f-mensaje').value = DEFAULT_MENSAJE_RECORDATORIO; };
+    document.getElementById('modal-save-mensaje').onclick = function(){
+      var val = document.getElementById('f-mensaje').value;
+      db.doc('config/centro').set(Object.assign({}, state.config, { mensajeRecordatorio: val })).then(function(){
+        toast('Mensaje de recordatorio actualizado.'); closeModal();
+      }).catch(function(err){ console.error(err); toast('No se pudo guardar. Intenta de nuevo.'); });
+    };
+  }
+
+  function openTarifaModal(roomId){
+    var c = state.consultorios.find(function(x){ return String(x.id)===String(roomId); });
+    if (!c) return;
+    var root = document.getElementById('modal-root');
+    root.innerHTML = ''
+      + '<div class="overlay" id="modal-overlay"><div class="modal">'
+      +   '<div class="modal-head"><h3>Detalles — ' + escapeHtml(c.nombre) + '</h3><button id="modal-close">✕</button></div>'
+      +   '<div class="modal-body">'
+      +     '<p style="margin:0;color:var(--ink-soft);font-size:.85rem">Estos datos se muestran en Consultorios, en "Compartir con doctores" y en el reporte de Rentabilidad.</p>'
+      +     '<div class="row2">'
+      +       '<div class="field"><label>Precio sugerido — completo/mes</label><input id="f-tc" type="number" min="0" value="' + (c.precioCompleto||'') + '"></div>'
+      +       '<div class="field"><label>Precio sugerido — por día/mes</label><input id="f-td" type="number" min="0" value="' + (c.precioDia||'') + '"></div>'
+      +     '</div>'
+      +     '<div class="field"><label>Metros cuadrados (m²)</label><input id="f-m2" type="number" min="0" value="' + (c.metrosCuadrados||'') + '"></div>'
+      +     '<div class="field"><label>Modalidades disponibles para ofrecer</label>'
+      +       '<div class="field checkline"><input type="checkbox" id="f-hab-completo" ' + (completoHabilitado(c)?'checked':'') + '><label for="f-hab-completo">Ofrecer modalidad "consultorio completo"</label></div>'
+      +       '<div class="field checkline"><input type="checkbox" id="f-hab-dia" ' + (diaHabilitado(c)?'checked':'') + '><label for="f-hab-dia">Ofrecer modalidad "por día"</label></div>'
+      +       '<div class="hint">Desmarcar una modalidad solo afecta cómo se ofrece este consultorio cuando está vacío; no afecta alquileres ya activos.</div>'
+      +     '</div>'
+      +   '</div>'
+      +   '<div class="modal-foot"><button class="btn ghost" id="btn-delete-room" style="border-color:var(--brick);color:var(--brick)">Eliminar consultorio</button>'
+      +     '<div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button><button class="btn" id="modal-save-tarifa">Guardar</button></div></div>'
+      + '</div></div>';
+    document.getElementById('modal-close').onclick = closeModal;
+    document.getElementById('modal-cancel').onclick = closeModal;
+    document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+    document.getElementById('modal-save-tarifa').onclick = function(){
+      db.collection('consultorios').doc(String(c.id)).update({
+        precioCompleto: Number(document.getElementById('f-tc').value)||0,
+        precioDia: Number(document.getElementById('f-td').value)||0,
+        metrosCuadrados: Number(document.getElementById('f-m2').value)||0,
+        modalidadCompletoHabilitada: document.getElementById('f-hab-completo').checked,
+        modalidadDiaHabilitada: document.getElementById('f-hab-dia').checked
+      }).then(function(){ toast('Detalles del consultorio actualizados.'); closeModal(); })
+        .catch(function(err){ console.error(err); toast('No se pudo guardar. Intenta de nuevo.'); });
+    };
+    document.getElementById('btn-delete-room').onclick = function(){
+      var st = roomStatus(c.id);
+      if (st.tipo !== 'vacio'){ toast('Libera este consultorio antes de eliminarlo.'); return; }
+      openConfirmModal({
+        title: 'Eliminar consultorio',
+        message: 'Esta acción no se puede deshacer. Se eliminará permanentemente ' + c.nombre + ' del sistema.',
+        confirmLabel: 'Sí, eliminar',
+        danger: true,
+        onConfirm: function(){
+          db.collection('consultorios').doc(String(c.id)).delete().then(function(){
+            toast('Consultorio eliminado.');
+          }).catch(function(err){ console.error(err); toast('No se pudo eliminar. Intenta de nuevo.'); });
+        }
+      });
+    };
+  }
+
+  function openNuevoConsultorioModal(){
+    var ns = { piso:'1', pisoNumero:'', metros:'', precioCompleto:'', precioDia:'', habCompleto:true, habDia:true, error:'' };
+    function draw(){
+      var root = document.getElementById('modal-root');
+      root.innerHTML = ''
+        + '<div class="overlay" id="modal-overlay"><div class="modal">'
+        +   '<div class="modal-head"><h3>Agregar consultorio</h3><button id="modal-close">✕</button></div>'
+        +   '<div class="modal-body">'
+        +     (ns.error ? '<div class="error-msg">' + escapeHtml(ns.error) + '</div>' : '')
+        +     '<div class="row2">'
+        +       '<div class="field"><label>Piso</label><select id="nf-piso">'
+        +         [1,2,3].map(function(p){ return '<option value="'+p+'" '+(String(ns.piso)===String(p)?'selected':'')+'>Piso '+p+'</option>'; }).join('')
+        +       '</select></div>'
+        +       '<div class="field"><label>Número de consultorio</label><input id="nf-numero" type="number" min="1" value="'+escapeHtml(ns.pisoNumero)+'" placeholder="Ej. 12"></div>'
+        +     '</div>'
+        +     '<div class="hint">El consultorio quedará identificado como "Piso ' + escapeHtml(String(ns.piso)) + ' - Consultorio ' + escapeHtml(ns.pisoNumero || '__') + '". El número debe ser único dentro del piso elegido.</div>'
+        +     '<div class="row2">'
+        +       '<div class="field"><label>Precio sugerido — completo/mes (opcional)</label><input id="nf-tc" type="number" min="0" value="'+escapeHtml(ns.precioCompleto)+'"></div>'
+        +       '<div class="field"><label>Precio sugerido — por día/mes (opcional)</label><input id="nf-td" type="number" min="0" value="'+escapeHtml(ns.precioDia)+'"></div>'
+        +     '</div>'
+        +     '<div class="field"><label>Metros cuadrados (m², opcional)</label><input id="nf-m2" type="number" min="0" value="'+escapeHtml(ns.metros)+'"></div>'
+        +     '<div class="field"><label>Modalidades disponibles</label>'
+        +       '<div class="field checkline"><input type="checkbox" id="nf-hab-completo" ' + (ns.habCompleto?'checked':'') + '><label for="nf-hab-completo">Ofrecer modalidad "consultorio completo"</label></div>'
+        +       '<div class="field checkline"><input type="checkbox" id="nf-hab-dia" ' + (ns.habDia?'checked':'') + '><label for="nf-hab-dia">Ofrecer modalidad "por día"</label></div>'
+        +     '</div>'
+        +   '</div>'
+        +   '<div class="modal-foot"><div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button><button class="btn" id="nf-save">Agregar consultorio</button></div></div>'
+        + '</div></div>';
+
+      document.getElementById('modal-close').onclick = closeModal;
+      document.getElementById('modal-cancel').onclick = closeModal;
+      document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+      document.getElementById('nf-piso').onchange = function(e){ ns.piso = e.target.value; ns.error=''; draw(); };
+      document.getElementById('nf-numero').oninput = function(e){ ns.pisoNumero = e.target.value; };
+      document.getElementById('nf-tc').oninput = function(e){ ns.precioCompleto = e.target.value; };
+      document.getElementById('nf-td').oninput = function(e){ ns.precioDia = e.target.value; };
+      document.getElementById('nf-m2').oninput = function(e){ ns.metros = e.target.value; };
+      document.getElementById('nf-hab-completo').onchange = function(e){ ns.habCompleto = e.target.checked; };
+      document.getElementById('nf-hab-dia').onchange = function(e){ ns.habDia = e.target.checked; };
+      document.getElementById('nf-save').onclick = save;
+    }
+    function save(){
+      var piso = Number(ns.piso);
+      var numero = Number(ns.pisoNumero);
+      if (!piso || piso<1){ ns.error='Selecciona el piso.'; draw(); return; }
+      if (!ns.pisoNumero || numero<=0){ ns.error='Indica el número de consultorio dentro del piso.'; draw(); return; }
+      var dup = state.consultorios.some(function(c){ return Number(c.piso)===piso && Number(c.pisoNumero)===numero; });
+      if (dup){ ns.error='Ya existe un consultorio con ese número en el piso ' + piso + '.'; draw(); return; }
+      if (!ns.habCompleto && !ns.habDia){ ns.error='Habilita al menos una modalidad.'; draw(); return; }
+      db.collection('consultorios').add({
+        piso: piso, pisoNumero: numero,
+        nombre: 'Piso ' + piso + ' - Consultorio ' + numero,
+        precioCompleto: Number(ns.precioCompleto)||0,
+        precioDia: Number(ns.precioDia)||0,
+        metrosCuadrados: Number(ns.metros)||0,
+        modalidadCompletoHabilitada: ns.habCompleto,
+        modalidadDiaHabilitada: ns.habDia,
+        notas: ''
+      }).then(function(){
+        toast('Consultorio agregado.');
+        closeModal();
+      }).catch(function(err){ console.error(err); ns.error='No se pudo guardar. Intenta de nuevo.'; draw(); });
+    }
+    draw();
+  }
+
+  function openAlquilerModal(opts){
+    opts = opts || {};
+    var isEdit = !!opts.editRental;
+    var er = opts.editRental;
+    var modalState = isEdit ? {
+      editId: er.id,
+      consultorioId: er.consultorioId,
+      modalidad: er.modalidad,
+      dias: er.modalidad === 'dia' ? getDias(er).slice() : [],
+      nombre: er.especialista.nombre, especialidad: er.especialista.especialidad||'', telefono: er.especialista.telefono||'', email: er.especialista.email||'',
+      precio: er.precioMensual ? String(er.precioMensual) : '', fecha: er.fechaInicio || new Date().toISOString().slice(0,10),
+      diaPago: er.diaPago || '1', depositoDado: !!(er.deposito && er.deposito.dado), depositoMonto: (er.deposito && er.deposito.monto) ? String(er.deposito.monto) : '',
+      error: ''
+    } : {
+      editId: null,
+      consultorioId: opts.consultorioId || '',
+      modalidad: opts.dia ? 'dia' : 'completo',
+      dias: opts.dia ? [opts.dia] : [],
+      nombre:'', especialidad:'', telefono:'', email:'',
+      precio:'', fecha: new Date().toISOString().slice(0,10),
+      diaPago:'1', depositoDado:false, depositoMonto:'',
+      error: ''
+    };
+
+    function occupiedInfo(consultorioId){
+      return roomStatus(consultorioId, isEdit ? modalState.editId : null);
+    }
+    function roomObj(consultorioId){
+      return state.consultorios.find(function(x){ return String(x.id)===String(consultorioId); });
+    }
+
+    function draw(){
+      var root = document.getElementById('modal-root');
+      var byFloor = roomsByFloor(state.consultorios);
+      var roomOptions = pisosPresentes().map(function(p){
+        var rs = byFloor[p] || [];
+        if (rs.length === 0) return '';
+        return '<optgroup label="Piso ' + p + '">' + rs.map(function(c){
+          var st = occupiedInfo(c.id);
+          var label = c.nombre + (st.tipo==='completo' ? ' — ocupado (completo)' : st.tipo==='dia' ? ' — ' + ocupadosDiasCount(st) + '/6 días ocupados' : ' — vacío');
+          return '<option value="'+c.id+'" ' + (String(modalState.consultorioId)===String(c.id)?'selected':'') + '>' + escapeHtml(label) + '</option>';
+        }).join('') + '</optgroup>';
+      }).join('');
+
+      var cObj = modalState.consultorioId ? roomObj(modalState.consultorioId) : null;
+      var st = modalState.consultorioId ? occupiedInfo(modalState.consultorioId) : null;
+      var completoBloqueado = (st && st.tipo !== 'vacio') || (cObj && !completoHabilitado(cObj));
+      var diaBloqueado = cObj && !diaHabilitado(cObj);
+      var diasOcupados = st && st.tipo==='dia' ? st.rentals.reduce(function(acc,r){ return acc.concat(getDias(r)); }, []) : (st && st.tipo==='completo' ? DIA_KEYS.slice() : []);
+
+      root.innerHTML = ''
+      + '<div class="overlay" id="modal-overlay"><div class="modal">'
+      +   '<div class="modal-head"><h3>' + (isEdit ? 'Editar alquiler' : 'Registrar alquiler') + '</h3><button id="modal-close">✕</button></div>'
+      +   '<div class="modal-body">'
+      +     (modalState.error ? '<div class="error-msg">' + escapeHtml(modalState.error) + '</div>' : '')
+      +     '<div class="field"><label>Consultorio</label><select id="f-room"><option value="">Selecciona un consultorio…</option>' + roomOptions + '</select></div>'
+      +     '<div class="field"><label>Modalidad</label><div class="radio-group">'
+      +       '<div class="radio-opt ' + (modalState.modalidad==='completo'?'sel':'') + (completoBloqueado?' blocked':'') + '" id="opt-completo">Consultorio completo (todo el mes)</div>'
+      +       '<div class="radio-opt ' + (modalState.modalidad==='dia'?'sel':'') + (diaBloqueado?' blocked':'') + '" id="opt-dia">Por día de la semana</div>'
+      +     '</div>'
+      +     (cObj && !completoHabilitado(cObj) ? '<div class="hint">Este consultorio no se ofrece en modalidad completo (ver "tarifas").</div>' : '')
+      +     (cObj && !diaHabilitado(cObj) ? '<div class="hint">Este consultorio no se ofrece en modalidad por día (ver "tarifas").</div>' : '')
+      +     '</div>'
+      +     (modalState.modalidad==='dia' ? (
+            '<div class="field"><label>Día(s) que usa este mes</label><div class="day-check">' +
+            DIAS.map(function(d){
+              var blocked = diasOcupados.indexOf(d.k)!==-1 && modalState.dias.indexOf(d.k)===-1;
+              var sel = modalState.dias.indexOf(d.k)!==-1;
+              return '<div class="day-chip ' + (sel?'sel':'') + (blocked?' blocked':'') + '" data-day="'+d.k+'">' + d.short + '</div>';
+            }).join('') + '</div></div>'
+          ) : '')
+      +     '<div class="row2">'
+      +       '<div class="field"><label>Nombre del especialista</label><input id="f-nombre" value="'+escapeHtml(modalState.nombre)+'" placeholder="Dra. Ana Pérez"></div>'
+      +       '<div class="field"><label>Especialidad</label><input id="f-especialidad" value="'+escapeHtml(modalState.especialidad)+'" placeholder="Cardiología"></div>'
+      +     '</div>'
+      +     '<div class="row2">'
+      +       '<div class="field"><label>Teléfono</label><input id="f-telefono" value="'+escapeHtml(modalState.telefono)+'" placeholder="809-000-0000"></div>'
+      +       '<div class="field"><label>Email (opcional)</label><input id="f-email" value="'+escapeHtml(modalState.email)+'" placeholder="correo@ejemplo.com"></div>'
+      +     '</div>'
+      +     '<div class="row2">'
+      +       '<div class="field"><label>Precio mensual total</label><input id="f-precio" type="number" min="0" value="'+escapeHtml(modalState.precio)+'" placeholder="RD$">'
+      +         '<div class="hint">Es el monto total que se le cobra al doctor cada mes, sin importar si eligió 1 o varios días.</div>'
+      +       '</div>'
+      +       '<div class="field"><label>Fecha de inicio</label><input id="f-fecha" type="date" value="'+modalState.fecha+'"></div>'
+      +     '</div>'
+      +     '<div class="field"><label>Día de pago mensual</label><div class="radio-group">'
+      +       '<div class="radio-opt ' + (modalState.diaPago==='1'?'sel':'') + '" id="opt-pago1">Día 1 de cada mes</div>'
+      +       '<div class="radio-opt ' + (modalState.diaPago==='15'?'sel':'') + '" id="opt-pago15">Día 15 de cada mes</div>'
+      +     '</div></div>'
+      +     '<div class="field checkline"><input type="checkbox" id="f-dep-check" ' + (modalState.depositoDado?'checked':'') + '><label for="f-dep-check">El especialista dio depósito en garantía por daños</label></div>'
+      +     (modalState.depositoDado ? '<div class="field"><label>Monto del depósito</label><input id="f-dep-monto" type="number" min="0" value="'+escapeHtml(modalState.depositoMonto)+'" placeholder="RD$"></div>' : '')
+      +   '</div>'
+      +   '<div class="modal-foot"><div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button><button class="btn" id="modal-save">' + (isEdit ? 'Guardar cambios' : 'Guardar alquiler') + '</button></div></div>'
+      + '</div></div>';
+
+      document.getElementById('modal-close').onclick = closeModal;
+      document.getElementById('modal-cancel').onclick = closeModal;
+      document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+
+      document.getElementById('f-room').onchange = function(e){
+        modalState.consultorioId = e.target.value;
+        modalState.dias=[];
+        modalState.error='';
+        var newC = roomObj(modalState.consultorioId);
+        if (newC && !completoHabilitado(newC) && diaHabilitado(newC)) modalState.modalidad = 'dia';
+        else if (newC && completoHabilitado(newC)) modalState.modalidad = 'completo';
+        draw();
+      };
+      document.getElementById('opt-completo').onclick = function(){ if(!completoBloqueado){ modalState.modalidad='completo'; modalState.error=''; draw(); } };
+      document.getElementById('opt-dia').onclick = function(){ if(!diaBloqueado){ modalState.modalidad='dia'; modalState.error=''; draw(); } };
+      document.getElementById('opt-pago1').onclick = function(){ modalState.diaPago='1'; draw(); };
+      document.getElementById('opt-pago15').onclick = function(){ modalState.diaPago='15'; draw(); };
+
+      root.querySelectorAll('[data-day]').forEach(function(chip){
+        chip.onclick = function(){
+          var dk = chip.dataset.day;
+          if (chip.classList.contains('blocked')) return;
+          var idx = modalState.dias.indexOf(dk);
+          if (idx===-1) modalState.dias.push(dk); else modalState.dias.splice(idx,1);
+          draw();
+        };
+      });
+
+      ['f-nombre','f-especialidad','f-telefono','f-email','f-precio','f-fecha','f-dep-monto'].forEach(function(id){
+        var el = document.getElementById(id);
+        if (!el) return;
+        var key = {'f-nombre':'nombre','f-especialidad':'especialidad','f-telefono':'telefono','f-email':'email','f-precio':'precio','f-fecha':'fecha','f-dep-monto':'depositoMonto'}[id];
+        el.oninput = function(e){ modalState[key] = e.target.value; };
+      });
+      document.getElementById('f-dep-check').onchange = function(e){ modalState.depositoDado = e.target.checked; draw(); };
+
+      document.getElementById('modal-save').onclick = save;
+    }
+
+    function save(){
+      if (!modalState.consultorioId){ modalState.error='Selecciona un consultorio.'; draw(); return; }
+      if (!modalState.nombre.trim()){ modalState.error='Escribe el nombre del especialista.'; draw(); return; }
+      if (!modalState.precio || Number(modalState.precio) <= 0){ modalState.error='Indica un precio mensual válido.'; draw(); return; }
+      if (modalState.depositoDado && (!modalState.depositoMonto || Number(modalState.depositoMonto) <= 0)){ modalState.error='Indica el monto del depósito, o desmarca la casilla si no dio depósito.'; draw(); return; }
+      var cObj = roomObj(modalState.consultorioId);
+      if (modalState.modalidad === 'completo' && cObj && !completoHabilitado(cObj)){ modalState.error='Este consultorio no está habilitado para modalidad completo.'; draw(); return; }
+      if (modalState.modalidad === 'dia' && cObj && !diaHabilitado(cObj)){ modalState.error='Este consultorio no está habilitado para modalidad por día.'; draw(); return; }
+      var st = occupiedInfo(modalState.consultorioId);
+
+      if (modalState.modalidad === 'completo'){
+        if (st.tipo !== 'vacio'){ modalState.error='Ese consultorio ya está ocupado y no puede alquilarse completo.'; draw(); return; }
+        persist();
+      } else {
+        if (modalState.dias.length === 0){ modalState.error='Elige al menos un día de la semana.'; draw(); return; }
+        var ocupados = st.tipo==='dia' ? st.rentals.reduce(function(acc,r){ return acc.concat(getDias(r)); }, []) : (st.tipo==='completo' ? DIA_KEYS.slice() : []);
+        var choque = modalState.dias.find(function(d){ return ocupados.indexOf(d)!==-1; });
+        if (choque){ modalState.error='El día ' + dayLabel(choque) + ' ya está ocupado en ese consultorio.'; draw(); return; }
+        persist();
+      }
+    }
+
+    function persist(){
+      var especialista = { nombre: modalState.nombre.trim(), especialidad: modalState.especialidad.trim(), telefono: modalState.telefono.trim(), email: modalState.email.trim() };
+      var deposito = { dado: !!modalState.depositoDado, monto: modalState.depositoDado ? Number(modalState.depositoMonto)||0 : 0 };
+      var payload = {
+        consultorioId: modalState.consultorioId,
+        modalidad: modalState.modalidad,
+        dias: modalState.modalidad === 'dia' ? modalState.dias.slice() : [],
+        dia: modalState.modalidad === 'dia' ? modalState.dias[0] : null,
+        especialista: especialista,
+        precioMensual: Number(modalState.precio),
+        fechaInicio: modalState.fecha,
+        diaPago: modalState.diaPago,
+        deposito: deposito,
+        activo: true
+      };
+      var op;
+      if (isEdit){
+        op = db.collection('alquileres').doc(modalState.editId).update(payload);
+      } else {
+        payload.creadoEn = new Date().toISOString();
+        op = db.collection('alquileres').add(payload);
+      }
+      op.then(function(){ toast(isEdit ? 'Alquiler actualizado.' : 'Alquiler registrado correctamente.'); closeModal(); })
+        .catch(function(err){ modalState.error = 'No se pudo guardar. Intenta de nuevo.'; draw(); console.error(err); });
+    }
+
+    draw();
+  }
+  function closeModal(){ document.getElementById('modal-root').innerHTML = ''; }
+
+  init();
+})();
+</script>
+</body>
+</html>

@@ -220,7 +220,7 @@
       <button data-view="rentabilidad"><span class="num">07</span>Rentabilidad</button>
       <button data-view="contratos"><span class="num">08</span>Contratos</button>
     </nav>
-    <div class="sidebar-foot">Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.03</span></div>
+    <div class="sidebar-foot">Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.04</span></div>
   </aside>
 
   <main class="main" id="main">
@@ -247,7 +247,7 @@
     consultorios: [],
     alquileres: [],
     pagos: {},
-    config: { telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'',
+    config: { telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'', mensajeAmigable:'', diasGraciaRecordatorio:3,
       nombreArrendador:'', nacionalidadArrendador:'', cedulaArrendador:'', domicilioArrendador:'',
       descripcionInmueble:'', serviciosIncluidos:'', ciudadFirma:'Santo Domingo de Guzmán, Distrito Nacional', duracionContrato:'un (1) año calendario' },
     loaded: { consultorios:false, alquileres:false, pagos:false, config:false },
@@ -350,7 +350,10 @@
     return { totalPeriodos: periods.length, pendientes: pendientes, mesesPendientes: pendientes.length, monto: pendientes.length * (Number(rental.precioMensual)||0) };
   }
   var DEFAULT_MENSAJE_RECORDATORIO = 'Hola {nombre}, le recordamos que tiene {meses} mes(es) de alquiler pendiente(s) por un total de {monto}, correspondiente a su consultorio ({consultorio}). Le agradecemos regularizar el pago a la mayor brevedad. ¡Gracias!';
+  var DEFAULT_MENSAJE_AMIGABLE = '¡Hola {nombre}! 😊 Solo un recordatorio amigable de que el pago de tu alquiler de este mes ({monto}, {consultorio}) sigue pendiente. Si ya lo hiciste, ¡mil gracias, ignora este mensaje! Cualquier cosa que necesites, aquí estamos. ¡Que tengas un excelente día!';
   function mensajeRecordatorioTemplate(){ return state.config.mensajeRecordatorio || DEFAULT_MENSAJE_RECORDATORIO; }
+  function mensajeAmigableTemplate(){ return state.config.mensajeAmigable || DEFAULT_MENSAJE_AMIGABLE; }
+  function diasGracia(){ return Number(state.config.diasGraciaRecordatorio) || 3; }
   function fillTemplate(tpl, vars){
     return tpl.replace(/\{(\w+)\}/g, function(m, key){ return (key in vars) ? vars[key] : m; });
   }
@@ -369,6 +372,28 @@
       nombre: rental.especialista.nombre,
       meses: String(debt.mesesPendientes),
       monto: money(debt.monto),
+      consultorio: roomName
+    });
+    return 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
+  }
+  /** Due date of the CURRENT month's payment cycle for a rental (based on diaPago). */
+  function fechaVencimientoMesActual(rental){
+    var today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), Number(rental.diaPago)||1);
+  }
+  /** Whole days elapsed since this month's due date (negative = not due yet). */
+  function diasDesdeVencimiento(rental){
+    var due = fechaVencimientoMesActual(rental);
+    var today = new Date();
+    var t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    return Math.round((t0 - due) / 86400000);
+  }
+  function buildWhatsAppUrlAmigable(rental, roomName){
+    var phone = normalizePhoneForWhatsApp(rental.especialista.telefono);
+    if (!phone) return null;
+    var msg = fillTemplate(mensajeAmigableTemplate(), {
+      nombre: rental.especialista.nombre,
+      monto: money(rental.precioMensual),
       consultorio: roomName
     });
     return 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
@@ -457,7 +482,7 @@
     }, function(err){ console.error(err); });
 
     db.doc('config/centro').onSnapshot(function(snap){
-      if (snap.exists) state.config = Object.assign({telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'',
+      if (snap.exists) state.config = Object.assign({telefonoContacto:'', emailContacto:'', mensajeRecordatorio:'', mensajeAmigable:'', diasGraciaRecordatorio:3,
         nombreArrendador:'', nacionalidadArrendador:'', cedulaArrendador:'', domicilioArrendador:'',
         descripcionInmueble:'', serviciosIncluidos:'', ciudadFirma:'Santo Domingo de Guzmán, Distrito Nacional', duracionContrato:'un (1) año calendario'
       }, snap.data());
@@ -786,7 +811,8 @@
     var montoMorosidad = conDeuda.reduce(function(s,x){ return s+x.debt.monto; }, 0);
 
     return ''
-    + '<div class="view-head"><div><h2>Cobros — ' + escapeHtml(monthLabel()) + '</h2><p>Marca cada alquiler como cobrado a medida que recibas el pago del mes.</p></div></div>'
+    + '<div class="view-head"><div><h2>Cobros — ' + escapeHtml(monthLabel()) + '</h2><p>Marca cada alquiler como cobrado a medida que recibas el pago del mes. El recordatorio amigable se habilita ' + diasGracia() + ' día(s) después de la fecha de pago.</p></div>'
+    +   '<button class="btn ghost small" id="btn-edit-mensaje-amigable">Personalizar recordatorio amigable</button></div>'
     + '<div class="hero-strip">'
     +   heroCell('Total esperado este mes', money(totalEsperado), activos.length + ' alquileres activos', 'gold')
     +   heroCell('Cobrado', money(totalCobrado), 'confirmado en ' + monthLabel(), 'moss')
@@ -794,18 +820,32 @@
     + '</div>'
     + '<div class="card"><div class="card-body">'
     + (activos.length === 0 ? '<p class="empty-note">No hay alquileres activos este mes.</p>' :
-      '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Modalidad</th><th>Precio</th><th>Día de pago</th><th>Este mes</th></tr></thead><tbody>'
+      '<table class="list"><thead><tr><th>Especialista</th><th>Consultorio</th><th>Modalidad</th><th>Precio</th><th>Día de pago</th><th>Este mes</th><th>Recordatorio amigable</th></tr></thead><tbody>'
       + activos.map(function(a){
           var p = state.pagos[a.id+'__'+mk];
           var pagado = !!(p && p.pagado);
           var modTag = a.modalidad === 'completo' ? 'Completo' : getDias(a).map(dayLabel).join(', ');
+          var room = roomName(a.consultorioId);
+          var diasVenc = diasDesdeVencimiento(a);
+          var recordatorioHtml;
+          if (pagado){
+            recordatorioHtml = '<span style="color:var(--ink-soft)">—</span>';
+          } else if (diasVenc < diasGracia()){
+            recordatorioHtml = '<span style="color:var(--ink-soft)">' + (diasVenc < 0 ? 'Aún no vence' : 'Disponible en ' + (diasGracia()-diasVenc) + ' día(s)') + '</span>';
+          } else {
+            var waUrlAmig = buildWhatsAppUrlAmigable(a, room);
+            recordatorioHtml = waUrlAmig
+              ? '<button class="btn small" data-whatsapp-url="' + escapeHtml(waUrlAmig) + '" style="background:#25D366;border-color:#25D366">Recordatorio amigable</button>'
+              : '<span class="tag sindep">Sin teléfono</span>';
+          }
           return '<tr>'
           + '<td>' + escapeHtml(a.especialista.nombre) + '</td>'
-          + '<td>' + escapeHtml(roomName(a.consultorioId)) + '</td>'
+          + '<td>' + escapeHtml(room) + '</td>'
           + '<td>' + modTag + '</td>'
           + '<td class="mono">' + money(a.precioMensual) + '</td>'
           + '<td class="mono">Día ' + escapeHtml(a.diaPago||'1') + '</td>'
           + '<td><button class="btn ' + (pagado ? 'ghost' : '') + ' small" data-pago="' + a.id + '">' + (pagado ? 'Cobrado ✓' : 'Marcar cobrado') + '</button></td>'
+          + '<td>' + recordatorioHtml + '</td>'
           + '</tr>';
         }).join('')
       + '</tbody></table>')
@@ -1200,6 +1240,8 @@
     main.querySelectorAll('[data-whatsapp-url]').forEach(function(b){ b.onclick = function(){ window.open(b.dataset.whatsappUrl, '_blank'); }; });
     var btnEditMsg = document.getElementById('btn-edit-mensaje');
     if (btnEditMsg) btnEditMsg.onclick = function(){ openMensajeRecordatorioModal(); };
+    var btnEditMsgAmigable = document.getElementById('btn-edit-mensaje-amigable');
+    if (btnEditMsgAmigable) btnEditMsgAmigable.onclick = function(){ openMensajeAmigableModal(); };
 
     var cfgTel = document.getElementById('cfg-telefono');
     var cfgEmail = document.getElementById('cfg-email');
@@ -1387,6 +1429,40 @@
       var val = document.getElementById('f-mensaje').value;
       db.doc('config/centro').set(Object.assign({}, state.config, { mensajeRecordatorio: val })).then(function(){
         toast('Mensaje de recordatorio actualizado.'); closeModal();
+      }).catch(function(err){ console.error(err); toast('No se pudo guardar. Intenta de nuevo.'); });
+    };
+  }
+
+  function openMensajeAmigableModal(){
+    var root = document.getElementById('modal-root');
+    var current = mensajeAmigableTemplate();
+    var dias = String(diasGracia());
+    root.innerHTML = ''
+      + '<div class="overlay" id="modal-overlay"><div class="modal">'
+      +   '<div class="modal-head"><h3>Recordatorio amigable — pago del mes</h3><button id="modal-close">✕</button></div>'
+      +   '<div class="modal-body">'
+      +     '<div class="field"><label>Enviar cuando hayan pasado</label><div class="radio-group">'
+      +       '<div class="radio-opt ' + (dias==='3'?'sel':'') + '" id="opt-dias3">3 días de la fecha de pago</div>'
+      +       '<div class="radio-opt ' + (dias==='5'?'sel':'') + '" id="opt-dias5">5 días de la fecha de pago</div>'
+      +     '</div></div>'
+      +     '<div class="field"><label>Texto del mensaje</label>'
+      +       '<textarea id="f-mensaje-amigable" rows="6" style="width:100%;padding:.55rem .6rem;border:1px solid var(--line);border-radius:4px;background:var(--paper);color:var(--ink);font-size:.9rem;font-family:inherit">' + escapeHtml(current) + '</textarea>'
+      +       '<div class="hint">Variables disponibles: {nombre}, {monto}, {consultorio}. Pensado como un empujoncito amable para el pago de este mes — antes de que entre en la lista de morosidad.</div>'
+      +     '</div>'
+      +   '</div>'
+      +   '<div class="modal-foot"><button class="btn ghost" id="btn-restore-default-amigable">Restaurar predeterminado</button><div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button><button class="btn" id="modal-save-mensaje-amigable">Guardar</button></div></div>'
+      + '</div></div>';
+    document.getElementById('modal-close').onclick = closeModal;
+    document.getElementById('modal-cancel').onclick = closeModal;
+    document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+    document.getElementById('opt-dias3').onclick = function(){ document.getElementById('opt-dias3').classList.add('sel'); document.getElementById('opt-dias5').classList.remove('sel'); };
+    document.getElementById('opt-dias5').onclick = function(){ document.getElementById('opt-dias5').classList.add('sel'); document.getElementById('opt-dias3').classList.remove('sel'); };
+    document.getElementById('btn-restore-default-amigable').onclick = function(){ document.getElementById('f-mensaje-amigable').value = DEFAULT_MENSAJE_AMIGABLE; };
+    document.getElementById('modal-save-mensaje-amigable').onclick = function(){
+      var val = document.getElementById('f-mensaje-amigable').value;
+      var diasVal = document.getElementById('opt-dias5').classList.contains('sel') ? 5 : 3;
+      db.doc('config/centro').set(Object.assign({}, state.config, { mensajeAmigable: val, diasGraciaRecordatorio: diasVal })).then(function(){
+        toast('Recordatorio amigable actualizado.'); closeModal();
       }).catch(function(err){ console.error(err); toast('No se pudo guardar. Intenta de nuevo.'); });
     };
   }

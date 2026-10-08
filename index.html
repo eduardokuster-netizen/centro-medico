@@ -11,6 +11,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root {
     --ink:#3A3448; --ink-soft:#726C82; --paper:#F3F1F7; --paper-raised:#FFFFFF;
@@ -224,7 +225,7 @@
     </nav>
     <div class="sidebar-foot">
       <button id="btn-logout" class="btn ghost small" style="width:100%;margin-bottom:.6rem">Cerrar sesión</button>
-      Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.10</span>
+      Los datos se guardan automáticamente y quedan disponibles la próxima vez que abras este panel.<br><span style="opacity:.75">v1.11</span>
     </div>
   </aside>
 
@@ -417,6 +418,59 @@
   function diasGracia(){ return Number(state.config.diasGraciaRecordatorio) || 3; }
   function fillTemplate(tpl, vars){
     return tpl.replace(/\{(\w+)\}/g, function(m, key){ return (key in vars) ? vars[key] : m; });
+  }
+  function stripAccents(s){
+    return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+  }
+  /** Accepts a date typed as text (2026-08-15, 15/08/2026), an Excel serial number,
+   * or a real Date object (when SheetJS parses a formatted date cell), and returns
+   * a plain 'YYYY-MM-DD' string, or '' if it can't be understood. */
+  function parseFechaExcel(value){
+    if (value == null || value === '') return '';
+    if (value instanceof Date){
+      if (isNaN(value.getTime())) return '';
+      return value.getUTCFullYear() + '-' + String(value.getUTCMonth()+1).padStart(2,'0') + '-' + String(value.getUTCDate()).padStart(2,'0');
+    }
+    if (typeof value === 'number'){
+      var ms = Math.round((value - 25569) * 86400 * 1000);
+      var d = new Date(ms);
+      if (isNaN(d.getTime())) return '';
+      return d.getUTCFullYear() + '-' + String(d.getUTCMonth()+1).padStart(2,'0') + '-' + String(d.getUTCDate()).padStart(2,'0');
+    }
+    var s = String(value).trim();
+    var m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); // DD/MM/AAAA
+    if (m) return m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0');
+    m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+    return '';
+  }
+  function parseDiasTexto(value){
+    var s = stripAccents(value);
+    if (!s) return [];
+    var map = {
+      lunes:'lunes', lun:'lunes',
+      martes:'martes', mar:'martes',
+      miercoles:'miercoles', mie:'miercoles', 'mier':'miercoles',
+      jueves:'jueves', jue:'jueves',
+      viernes:'viernes', vie:'viernes',
+      sabado:'sabado', sab:'sabado'
+    };
+    var found = [];
+    s.split(/[,;/]| y /).forEach(function(tok){
+      tok = tok.trim();
+      if (map[tok] && found.indexOf(map[tok]) === -1) found.push(map[tok]);
+    });
+    return found;
+  }
+  function parseModalidadTexto(value){
+    var s = stripAccents(value);
+    return s.indexOf('dia') !== -1 ? 'dia' : 'completo';
+  }
+  function parseSiNo(value){
+    var s = stripAccents(value);
+    return s === 'si' || s === 'sí' || s === 'x' || s === 'yes' || s === 'true';
   }
   // WhatsApp needs digits only, with country code. DR numbers are commonly typed
   // as 10 digits (809/829/849 + 7 digits) without the +1 country code, so we add it.
@@ -888,7 +942,7 @@
 
     return ''
     + '<div class="view-head"><div><h2>Especialistas</h2><p>Todos los alquileres registrados, activos e históricos. Puedes editar cualquier dato o liberar el consultorio cuando el especialista se vaya.</p></div>'
-    +   '<button class="btn" id="btn-new-alquiler">+ Registrar alquiler</button></div>'
+    +   '<button class="btn ghost" id="btn-importar-excel" style="margin-right:.6rem">Importar desde Excel</button><button class="btn" id="btn-new-alquiler">+ Registrar alquiler</button></div>'
     + '<div class="toolbar"><input class="search-input" id="esp-search" placeholder="Buscar por nombre o especialidad…" value="' + escapeHtml(state.search) + '"></div>'
     + '<div class="card"><div class="card-body">'
     + (rows.length === 0 ? '<p class="empty-note">Aún no hay alquileres registrados.</p>' :
@@ -1629,6 +1683,8 @@
 
     var btnNew = document.getElementById('btn-new-alquiler');
     if (btnNew) btnNew.onclick = function(){ openAlquilerModal({}); };
+    var btnImportar = document.getElementById('btn-importar-excel');
+    if (btnImportar) btnImportar.onclick = function(){ openImportarExcelModal(); };
     var btnNewRoom = document.getElementById('btn-new-consultorio');
     if (btnNewRoom) btnNewRoom.onclick = function(){ openNuevoConsultorioModal(); };
 
@@ -2087,6 +2143,217 @@
       }).catch(function(err){ console.error(err); ns.error='No se pudo guardar. Intenta de nuevo.'; draw(); });
     }
     draw();
+  }
+
+  function openImportarExcelModal(){
+    var root = document.getElementById('modal-root');
+    var state2 = { rows: null, fileName: '' };
+
+    function drawPicker(){
+      root.innerHTML = ''
+        + '<div class="overlay" id="modal-overlay"><div class="modal">'
+        +   '<div class="modal-head"><h3>Importar especialistas desde Excel</h3><button id="modal-close">✕</button></div>'
+        +   '<div class="modal-body">'
+        +     '<p style="margin:0;color:var(--ink-soft);font-size:.88rem">Selecciona el archivo de Excel ya lleno con la plantilla. Voy a revisar cada fila antes de importar nada — nada se guarda todavía en este paso.</p>'
+        +     '<div class="field"><input type="file" id="f-excel-file" accept=".xlsx,.xls"></div>'
+        +     '<div id="excel-status"></div>'
+        +   '</div>'
+        +   '<div class="modal-foot"><div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button></div></div>'
+        + '</div></div>';
+      document.getElementById('modal-close').onclick = closeModal;
+      document.getElementById('modal-cancel').onclick = closeModal;
+      document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+      document.getElementById('f-excel-file').onchange = function(e){
+        var file = e.target.files[0];
+        if (!file) return;
+        document.getElementById('excel-status').innerHTML = '<p class="hint">Leyendo archivo…</p>';
+        var reader = new FileReader();
+        reader.onload = function(ev){
+          try {
+            var wb = XLSX.read(new Uint8Array(ev.target.result), { type:'array', cellDates:true });
+            var sheetName = wb.SheetNames.indexOf('Especialistas') !== -1 ? 'Especialistas' : wb.SheetNames[0];
+            var ws = wb.Sheets[sheetName];
+            var rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'', raw:true });
+            rows.shift(); // drop header row
+            procesarFilas(rows);
+          } catch (err){
+            console.error(err);
+            document.getElementById('excel-status').innerHTML = '<div class="error-msg">No se pudo leer el archivo. Verifica que sea el formato de la plantilla.</div>';
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      };
+    }
+
+    function procesarFilas(rawRows){
+      var validas = [];
+      var errores = [];
+      // Track what each consultorio would end up with, seeded from the CURRENT
+      // database state, so two rows in the same file can't double-book a room.
+      var reservaCompleto = {};   // consultorioId -> true
+      var reservaDias = {};       // consultorioId -> { lunes:true, ... }
+      state.consultorios.forEach(function(c){
+        var st = roomStatus(c.id);
+        if (st.tipo === 'completo') reservaCompleto[c.id] = true;
+        else if (st.tipo === 'dia'){
+          reservaDias[c.id] = {};
+          st.rentals.forEach(function(r){ getDias(r).forEach(function(d){ reservaDias[c.id][d] = true; }); });
+        }
+      });
+
+      rawRows.forEach(function(row, idx){
+        var numFila = idx + 2; // +2: header was row 1, arrays are 0-based
+        var piso = row[0], numero = row[1], nombre = row[2], especialidad = row[3],
+            telefono = row[4], email = row[5], nacionalidad = row[6], cedula = row[7],
+            domicilio = row[8], modalidadRaw = row[9], diasRaw = row[10], precioRaw = row[11],
+            fechaRaw = row[12], diaPagoRaw = row[13], depositoRaw = row[14], montoDepRaw = row[15];
+
+        nombre = String(nombre||'').trim();
+        if (!nombre) return; // blank row, skip silently
+
+        if (nombre === 'Antonia Estrella Marrero' && String(cedula||'').trim() === '093-0078247-2'){
+          return; // example row left in by mistake — skip silently
+        }
+
+        var pisoNum = Number(piso), numeroNum = Number(numero);
+        var consultorio = state.consultorios.find(function(c){ return Number(c.piso)===pisoNum && Number(c.pisoNumero)===numeroNum; });
+        if (!consultorio){
+          errores.push({ fila:numFila, nombre:nombre, motivo:'No existe el Piso ' + piso + ' Consultorio ' + numero + ' en la app.' });
+          return;
+        }
+
+        var modalidad = parseModalidadTexto(modalidadRaw);
+        var precio = Number(precioRaw) || 0;
+        if (precio <= 0){
+          errores.push({ fila:numFila, nombre:nombre, motivo:'Falta el precio mensual o no es válido.' });
+          return;
+        }
+        var fechaInicio = parseFechaExcel(fechaRaw);
+        if (!fechaInicio){
+          errores.push({ fila:numFila, nombre:nombre, motivo:'La fecha de inicio falta o no tiene un formato reconocible.' });
+          return;
+        }
+        var diaPago = String(diaPagoRaw||'').trim() === '15' ? '15' : '1';
+        var depositoDado = parseSiNo(depositoRaw);
+        var montoDep = Number(montoDepRaw)||0;
+        if (depositoDado && montoDep <= 0){
+          errores.push({ fila:numFila, nombre:nombre, motivo:'Marcaste depósito dado pero falta el monto.' });
+          return;
+        }
+
+        if (modalidad === 'completo'){
+          var yaOcupadoCompleto = reservaCompleto[consultorio.id] || (reservaDias[consultorio.id] && Object.keys(reservaDias[consultorio.id]).length > 0);
+          if (yaOcupadoCompleto){
+            errores.push({ fila:numFila, nombre:nombre, motivo:'Piso ' + piso + ' Consultorio ' + numero + ' ya está ocupado (por esta u otra fila del archivo).' });
+            return;
+          }
+          reservaCompleto[consultorio.id] = true;
+        } else {
+          var dias = parseDiasTexto(diasRaw);
+          if (dias.length === 0){
+            errores.push({ fila:numFila, nombre:nombre, motivo:'Modalidad "Por dia" pero no se reconoció ningún día en "Dias de la semana".' });
+            return;
+          }
+          if (reservaCompleto[consultorio.id]){
+            errores.push({ fila:numFila, nombre:nombre, motivo:'Piso ' + piso + ' Consultorio ' + numero + ' ya está ocupado completo.' });
+            return;
+          }
+          reservaDias[consultorio.id] = reservaDias[consultorio.id] || {};
+          var choque = dias.find(function(d){ return reservaDias[consultorio.id][d]; });
+          if (choque){
+            errores.push({ fila:numFila, nombre:nombre, motivo:'El día ' + dayLabel(choque) + ' de Piso ' + piso + ' Consultorio ' + numero + ' ya está ocupado (por esta u otra fila del archivo).' });
+            return;
+          }
+          dias.forEach(function(d){ reservaDias[consultorio.id][d] = true; });
+        }
+
+        validas.push({
+          fila: numFila,
+          consultorioId: consultorio.id,
+          consultorioNombre: consultorio.nombre,
+          modalidad: modalidad,
+          dias: modalidad === 'dia' ? parseDiasTexto(diasRaw) : [],
+          especialista: {
+            nombre: nombre,
+            especialidad: String(especialidad||'').trim(),
+            telefono: String(telefono||'').trim(),
+            email: String(email||'').trim(),
+            nacionalidad: String(nacionalidad||'').trim(),
+            cedula: String(cedula||'').trim(),
+            domicilio: String(domicilio||'').trim()
+          },
+          precioMensual: precio,
+          fechaInicio: fechaInicio,
+          diaPago: diaPago,
+          deposito: { dado: depositoDado, monto: depositoDado ? montoDep : 0 }
+        });
+      });
+
+      drawResumen(validas, errores);
+    }
+
+    function drawResumen(validas, errores){
+      root.innerHTML = ''
+        + '<div class="overlay" id="modal-overlay"><div class="modal" style="max-width:680px">'
+        +   '<div class="modal-head"><h3>Revisión antes de importar</h3><button id="modal-close">✕</button></div>'
+        +   '<div class="modal-body">'
+        +     '<div class="hero-strip" style="margin-bottom:0">'
+        +       heroCell('Listas para importar', String(validas.length), 'se crearán como alquileres activos', validas.length>0?'moss':'')
+        +       heroCell('Con errores', String(errores.length), 'no se importarán — corrígelas y vuelve a intentar', errores.length>0?'brick':'moss')
+        +     '</div>'
+        +     (validas.length === 0 ? '' :
+              '<div><h4 style="margin:1rem 0 .4rem;font-size:.88rem">Se importarán</h4>'
+              + '<table class="list"><thead><tr><th>Fila</th><th>Especialista</th><th>Consultorio</th><th>Modalidad</th><th>Precio</th></tr></thead><tbody>'
+              + validas.map(function(v){
+                  var mod = v.modalidad==='completo' ? 'Completo' : v.dias.map(dayLabel).join(', ');
+                  return '<tr><td class="mono">' + v.fila + '</td><td>' + escapeHtml(v.especialista.nombre) + '</td><td>' + escapeHtml(v.consultorioNombre) + '</td><td>' + mod + '</td><td class="mono">' + money(v.precioMensual) + '</td></tr>';
+                }).join('')
+              + '</tbody></table></div>')
+        +     (errores.length === 0 ? '' :
+              '<div><h4 style="margin:1rem 0 .4rem;font-size:.88rem;color:var(--brick)">No se importarán</h4>'
+              + '<table class="list"><thead><tr><th>Fila</th><th>Nombre</th><th>Motivo</th></tr></thead><tbody>'
+              + errores.map(function(e){
+                  return '<tr><td class="mono">' + e.fila + '</td><td>' + escapeHtml(e.nombre) + '</td><td>' + escapeHtml(e.motivo) + '</td></tr>';
+                }).join('')
+              + '</tbody></table></div>')
+        +   '</div>'
+        +   '<div class="modal-foot"><button class="btn ghost" id="btn-elegir-otro">Elegir otro archivo</button>'
+        +     '<div class="right"><button class="btn ghost" id="modal-cancel">Cancelar</button>'
+        +     (validas.length>0 ? '<button class="btn" id="btn-confirmar-importar">Importar ' + validas.length + ' especialista(s)</button>' : '')
+        +     '</div></div>'
+        + '</div></div>';
+      document.getElementById('modal-close').onclick = closeModal;
+      document.getElementById('modal-cancel').onclick = closeModal;
+      document.getElementById('modal-overlay').onclick = function(e){ if (e.target.id==='modal-overlay') closeModal(); };
+      document.getElementById('btn-elegir-otro').onclick = drawPicker;
+      var btnConfirmar = document.getElementById('btn-confirmar-importar');
+      if (btnConfirmar) btnConfirmar.onclick = function(){
+        btnConfirmar.disabled = true; btnConfirmar.textContent = 'Importando…';
+        Promise.all(validas.map(function(v){
+          return db.collection('alquileres').add({
+            consultorioId: v.consultorioId,
+            modalidad: v.modalidad,
+            dias: v.dias,
+            dia: v.dias[0] || null,
+            especialista: v.especialista,
+            precioMensual: v.precioMensual,
+            fechaInicio: v.fechaInicio,
+            diaPago: v.diaPago,
+            deposito: v.deposito,
+            activo: true,
+            creadoEn: new Date().toISOString()
+          });
+        })).then(function(){
+          toast(validas.length + ' especialista(s) importado(s) correctamente.');
+          closeModal();
+        }).catch(function(err){
+          console.error(err);
+          toast('Ocurrió un error al importar. Revisa la consola.');
+        });
+      };
+    }
+
+    drawPicker();
   }
 
   function openAlquilerModal(opts){
